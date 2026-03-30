@@ -1,0 +1,62 @@
+---
+title: "EDA_SalaryandPlayerData"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+# Load ASA Library
+library(itscalledsoccer)
+```
+
+```{r}
+# Instantiate a new instance of the ASA class
+asa_client <- AmericanSoccerAnalysis$new()
+```
+
+```{r}
+# Access dataframes of games, players, teams, and more from the ASA client object created above
+all_games <- asa_client$games
+all_teams <- asa_client$teams
+all_players <- asa_client$players
+
+# see league options
+asa_client$LEAGUES
+```
+
+```{r}
+# Get season-by-season shot information (i.e., xgoals) for all players in MLS
+asa_xgoals <- asa_client$get_player_xgoals(
+    leagues = "mls",
+    split_by_seasons = TRUE
+)
+
+# Join player names
+library(dplyr)
+asa_xgoals <- asa_xgoals %>%
+    left_join(all_players,
+              by = "player_id")
+```
+
+
+```{r}
+# Get team g+ information (i.e., goals added) from MLS
+library(tidyr)
+
+# tall version
+asa_goals_added_tall <- asa_client$get_team_goals_added(
+    leagues = "mls", 
+    season_name = 2025) %>%
+    tidyr::unnest(data)
+
+# wide version
+asa_goals_added_wide <- asa_client$get_team_goals_added(
+    leagues = "mls", 
+    season_name = 2025) %>%
+    tidyr::unnest(data) %>%
+    tidyr::pivot_wider( id_cols = team_id, 
+                        names_from = action_type, 
+                        values_from = c(num_actions_for:goals_added_against))
+
+```
