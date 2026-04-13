@@ -1,9 +1,9 @@
 ---
 title: "MLS Salary, Roster Construction, and Team Performance"
 author:
-  - "Your Name"
-  - "Teammate 1"
-  - "Teammate 2"
+  - "Dominic Hoar-Weiler (dhoarwei)"
+  - "Brendan Flynn (bflynn)"
+  - "Nick Kourakis (nkouraki)"
 date: "`r Sys.Date()`"
 output:
   pdf_document:
@@ -14,15 +14,23 @@ geometry: margin=1in
 ---
 
 ```{r}
+# Load ASA Library
+library(itscalledsoccer)
 library(tidyverse)
 library(broom)
 library(mgcv)
 library(lme4)
+library(tidyr)
+library(lubridate)
 
-# TODO: Replace these with your actual file paths / data pulls
-# salary_data <- read_csv("data/mls_salaries.csv")
-# team_data   <- read_csv("data/mls_team_performance.csv")
-# player_data <- read_csv("data/mls_player_performance.csv")
+# Instantiate a new instance of the ASA class
+asa_client <- AmericanSoccerAnalysis$new()
+
+all_games <- asa_client$games
+all_teams <- asa_client$teams
+all_players <- asa_client$players
+
+asa_client$LEAGUES
 ```
 
 # Introduction
@@ -76,99 +84,273 @@ Potential explanatory variables include:
 # Data Cleaning and Preprocessing
 
 ```{r}
-# TODO: Build your merged datasets here
-# Example placeholders:
+players <- asa_client$get_players(leagues = 'mls')
+teams <- asa_client$get_teams(leagues = 'mls')
 
-#team_season <- salary_data |>
-#  group_by(team, season) |>
-#   summarize(
-#     total_payroll = sum(base_salary, na.rm = TRUE),
-#     top3_salary_share = sum(sort(base_salary, decreasing = TRUE)[1:3], na.rm = TRUE) / total_payroll,
-#     .groups = "drop"
-#   ) |>
-#   left_join(team_data, by = c("team", "season"))
+# Get team g+ information (i.e., goals added) from MLS
+# tall version
+asa_goals_added_tall <- asa_client$get_team_goals_added(
+    leagues = "mls", season_name = 2025) |>
+    tidyr::unnest(data) |>
+  left_join(teams, by = c("team_id" = "team_id"))
+  
+asa_mls_salaries <- asa_client$get_player_salaries(leagues = 'mls') |>
+  left_join(players, by = c("player_id"="player_id"))
 
-# player_season <- salary_data |>
-#   left_join(player_data, by = c("player_id", "season"))
+mls_salaries_2025 <- asa_mls_salaries |>
+  filter(season_name == 2025)
+
+mls_salaries_by_team <- mls_salaries_2025 |>
+  group_by(team_id) |>
+  summarize(total_salary = sum(base_salary))
+
+reference_date <- as.Date("2025-07-01")
+
+mls_salaries_2025 <- mls_salaries_2025 |>
+  mutate(
+    birth_date = as.Date(birth_date),
+    age = as.numeric(difftime(reference_date, birth_date, units = "days")) / 365.25
+  )
+
 ```
 
 Describe any major cleaning steps here
 
+```{r}
+# Here we use statistical estimations to estimate the players salary designations on each team
+# We can improve this later by scraping the data from online
+# Team performance outcome: goals added differential
+team_performance <- asa_goals_added_tall |>
+  group_by(team_id) |>
+  summarize(
+    goals_added_dif = sum(goals_added_for - goals_added_against, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Team salary
+team_salary <- mls_salaries_2025 |>
+  group_by(team_id) |>
+  summarize(
+    total_salary = sum(base_salary, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Top-3 salary concentration
+salary_concentration <- mls_salaries_2025 |>
+  group_by(team_id) |>
+  arrange(desc(base_salary), .by_group = TRUE) |>
+  mutate(rank = row_number()) |>
+  summarize(
+    top3_salary = sum(base_salary[rank <= 3], na.rm = TRUE),
+    team_salary_tmp = sum(base_salary, na.rm = TRUE),
+    top3_share = top3_salary / team_salary_tmp,
+    .groups = "drop"
+  ) |>
+  select(team_id, top3_share)
+
+reference_date <- as.Date("2025-07-01")
+
+mls_salaries_2025 <- mls_salaries_2025 |>
+  mutate(
+    birth_date = as.Date(birth_date),
+    age = as.numeric(difftime(reference_date, birth_date, units = "days")) / 365.25,
+    is_u22 = age < 23
+  )
+
+# DP proxy
+dp_threshold <- quantile(mls_salaries_2025$base_salary, 0.97, na.rm = TRUE)
+
+dp_summary <- mls_salaries_2025 |>
+  mutate(is_dp = base_salary >= dp_threshold) |>
+  group_by(team_id) |>
+  summarize(
+    num_dp = sum(is_dp, na.rm = TRUE),
+    dp_salary = sum(base_salary[is_dp], na.rm = TRUE),
+    dp_share = dp_salary / sum(base_salary, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# U22 summary
+u22_summary <- mls_salaries_2025 |>
+  group_by(team_id) |>
+  summarize(
+    num_u22 = sum(is_u22, na.rm = TRUE),
+    u22_share = sum(base_salary[is_u22], na.rm = TRUE) / sum(base_salary, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Team strategy
+team_strategy <- dp_summary |>
+  left_join(u22_summary, by = "team_id") |>
+  mutate(
+    strategy = case_when(
+      num_dp >= 3 ~ "DP_model",
+      num_u22 >= 4 ~ "Youth_model",
+      TRUE ~ "Hybrid"
+    )
+  ) |>
+  select(team_id, strategy)
+
+# Efficiency features
+efficiency_features <- mls_salaries_2025 |>
+  group_by(team_id) |>
+  summarize(
+    salary_variance = var(base_salary, na.rm = TRUE),
+    median_salary = median(base_salary, na.rm = TRUE),
+    low_salary_share = mean(base_salary < 200000, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Master team-level modeling dataset
+team_model_data <- team_performance |>
+  left_join(team_salary, by = "team_id") |>
+  left_join(salary_concentration, by = "team_id") |>
+  left_join(dp_summary, by = "team_id") |>
+  left_join(u22_summary, by = "team_id") |>
+  left_join(team_strategy, by = "team_id") |>
+  left_join(efficiency_features, by = "team_id") |>
+  mutate(log_salary = log(total_salary))
+```
+
+
 # Exploratory Data Analysis
 
-Salary distribution
+### Salary distribution
 
 ```{r}
-# TODO: salary distribution plot
-# ggplot(player_season, aes(x = base_salary)) +
-#   geom_histogram(bins = 40) +
-#   scale_x_continuous(labels = dollar)
+ggplot(mls_salaries_2025, aes(x = base_salary)) +
+  geom_histogram(bins = 50) +
+  scale_x_continuous(labels = scales::dollar) +
+  labs(title = "MLS Salary Distribution (2025)",
+       x = "Base Salary",
+       y = "Count")
+
+ggplot(mls_salaries_2025, aes(x = log(base_salary))) +
+  geom_histogram(bins = 50) +
+  labs(title = "Log Salary Distribution (2025)",
+       x = "Log(Base Salary)",
+       y = "Count")
+```
+
+#### Takeaway
+
+Salaries are highly right-skewed, meaning a small number of players earn disproportionately high salaries and suggesting a star-driven league structure.
+
+### Team Payroll vs Team Performance
+
+```{r}
+plot_data <- team_model_data
+
+ggplot(plot_data, aes(x = log_salary, y = goals_added_dif)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Team Performance vs Payroll (2025)",
+    x = "Log Total Salary",
+    y = "Goals Added Differential"
+  )
+```
+
+#### Takeaway
+
+We see a weak/moderate positive relationship (likely). Payroll alone does not fully explain performance, which motivates out decision to add roster structure variables.
+
+### Salary concentration vs team performance
+
+```{r}
+concentration_plot_data <- team_model_data
+
+ggplot(concentration_plot_data, aes(x = top3_share, y = goals_added_dif)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Salary Concentration vs Team Performance",
+    x = "Top 3 Salary Share",
+    y = "Goals Added Differential"
+  )
+```
+
+#### Takeaway
+
+The regression line is essentially flat. Confidence band is wide. Points are highly scattered. No visible monotonic trend.
+
+### Positional Allocation Patterns
+
+```{r}
+ggplot(position_salary, aes(x = factor(team_id), y = pos_share, fill = position)) +
+  geom_col() +
+  labs(
+    title = "Salary Allocation by Position (2025)",
+    x = "Team",
+    y = "Share of Payroll"
+  ) +
+  theme(axis.text.x = element_blank())
+
+pos_perf <- plot_data |>
+  left_join(position_wide, by = "team_id")
+
+ggplot(pos_perf, aes(x = F, y = goals_added_dif)) +  # adjust column name
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Attacker Spending vs Performance")
 ```
 
 EDA takeaway: TODO
 
-Team payroll vs team performance
-
 ```{r}
-# TODO: scatterplot of payroll vs xGD / g+ diff / points
+ggplot(concentration_plot_data,
+       aes(x = log_salary,
+           y = goals_added_dif,
+           size = top3_share)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "Payroll, Concentration, and Performance",
+       x = "Log Payroll",
+       y = "Goals Added Differential",
+       size = "Top 3 Share")
 ```
-
-EDA takeaway: TODO
-
-Salary concentration vs team performance
-
-```{r}
-# TODO: scatterplot of top3 share or HHI vs performance
-```
-
-EDA takeaway: TODO
-
-Positional allocation patterns
-
-```{r}
-# TODO: stacked bar chart or scatterplot by team/season
-```
-
-EDA takeaway: TODO
 
 # Methods
-
-Shared modeling goal
 
 Across all individual analyses, the goal is to evaluate how roster construction and salary allocation relate to team success. Each group member fits a distinct model, motivated by a different statistical perspective.
 
 # Individual Analysis 1: Team-level linear regression
 
-Question
+
+### Question
 
 Does team performance increase with total payroll, and does salary concentration help or hurt after controlling for total spending?
 
-Model specification
+### Model specification
 
-# fit_lm <- lm(
-#   xgd_per_90 ~ log(total_payroll) + top3_salary_share + attacker_share + midfielder_share + defender_share,
-#   data = team_season
-# )
+```{r}
+model1 <- lm(
+  goals_added_dif ~ log_salary + top3_share + num_dp + num_u22 + dp_share + u22_share + strategy,
+  data = team_model_data
+)
 
-Assumptions
+summary(model1)
+```
+
+### Assumptions
 	•	Linearity
 	•	Independence across team-seasons
 	•	Constant variance
 	•	Limited omitted variable bias
 
-Why this model is appropriate
+### Why this model is appropriate
 
 This provides a simple, interpretable baseline model linking roster spending strategy to performance.
 
-Model evaluation plan
+### Model evaluation plan
+
 	•	RMSE / MAE
 	•	Residual diagnostics
 	•	Compare alternative predictor sets
 
-Uncertainty plan
+### Uncertainty plan
+
 	•	95% confidence intervals for coefficients
 	•	Optional bootstrap confidence intervals
-
 
 
 # Individual Analysis 2: GAM / nonlinear team model
@@ -245,7 +427,7 @@ Uncertainty plan
 
 # Results
 
-Individual Analysis 1 Results
+### Individual Analysis 1 Results
 
 ```{r}
 # TODO: tidy coefficient table / model summary
@@ -254,10 +436,13 @@ Individual Analysis 1 Results
 # TODO: coefficient plot or fitted vs observed plot
 ```
 
-Key interpretation: TODO
+We first estimated a baseline linear regression model relating team performance (goals added differential) to total payroll and salary concentration (top-three salary share).
 
+The model explains very little variation in team performance ($R^2$ = 0.019), and neither predictor is statistically significant. While the coefficient on log payroll is positive, suggesting higher-spending teams may perform slightly better, the estimate is highly uncertain ($p$ = 0.48). Similarly, the estimated effect of salary concentration is negative but imprecise ($p$ = 0.63).
 
-Individual Analysis 2 Results
+Overall, these results suggest that simple measures of payroll and salary concentration alone do not adequately explain variation in team performance in MLS.
+
+### Individual Analysis 2 Results
 
 ```{r}
 # TODO: summary(fit_gam)
@@ -265,14 +450,12 @@ Individual Analysis 2 Results
 # TODO: plot smooth terms 
 ```
 
-Key interpretation: TODO
 
+### Individual Analysis 3 Results
 
-Individual Analysis 3 Results
+#### TODO: salary-performance curve by position
 
-# TODO: salary-performance curve by position
-
-# TODO: team value-per-dollar rankings with uncertainty bars
+#### TODO: team value-per-dollar rankings with uncertainty bars
 
 Key interpretation: TODO
 
