@@ -1,0 +1,156 @@
+---
+title: "Doms_model"
+output: html_document
+---
+
+# Methods
+
+Across all individual analyses, the goal is to evaluate how roster construction and salary allocation relate to team success. Each group member fits a distinct model, motivated by a different statistical perspective.
+
+## Individual Analysis 1: Team-level linear regression
+
+
+### Question
+
+Does team performance increase with total payroll, and does salary concentration help or hurt after controlling for total spending?
+
+### Model specification
+
+```{r}
+model1 <- lm(
+  goals_added_dif ~ log_salary + top3_share + num_dp + num_u22 + dp_share + u22_share + strategy,
+  data = team_model_data
+)
+
+broom::tidy(model1, conf.int = TRUE)
+```
+
+### Assumptions
+	•	Linearity
+	•	Independence across team-seasons
+	•	Constant variance
+	•	Limited omitted variable bias
+
+### Why this model is appropriate
+
+This provides a simple, interpretable baseline model linking roster spending strategy to performance.
+
+### Model evaluation plan
+
+	•	RMSE / MAE
+	•	Residual diagnostics
+	•	Compare alternative predictor sets
+
+### Uncertainty plan
+
+	•	95% confidence intervals for coefficients
+	•	Optional bootstrap confidence intervals
+
+
+## Individual Analysis 2: GAM / nonlinear team model
+
+Question
+
+Are the effects of payroll and salary concentration nonlinear?
+
+Model specification
+
+```{r, include = FALSE}
+#fit_gam <- gam(
+#xgd_per_90 ~ s(log(total_payroll)) + s(top3_salary_share) + s(attacker_share) + s(defender_share),
+#data = team_season,
+#method = "REML"
+)
+```
+
+Why this model is appropriate
+
+A GAM allows the relationship between spending and performance to be flexible rather than forcing a strictly linear effect.
+
+Model evaluation plan
+	•	Compare against linear regression
+	•	Check effective degrees of freedom
+	•	Out-of-sample prediction error
+
+Uncertainty plan
+	•	Confidence bands for smooth terms
+	•	Bootstrap uncertainty if needed
+
+
+## Individual Analysis 3: Player-level value model
+
+Question
+
+What kinds of salary allocations generate the most player value per dollar, and how does that aggregate to team-level efficiency?
+
+Model specification
+
+```{r, include = FALSE}
+# fit_player_gam <- gam(
+#   g_plus_per_90 ~ s(log(base_salary)) + position + s(log(base_salary), by = position),
+#   data = player_season,
+#   method = "REML"
+# )
+```
+
+Aggregation step
+
+```{r, include = FALSE}
+# player_season <- player_season |>
+#   mutate(predicted_value = predict(fit_player_gam, newdata = player_season))
+#
+# team_efficiency <- player_season |>
+#   group_by(team, season) |>
+#   summarize(
+#     predicted_team_value = sum(predicted_value, na.rm = TRUE),
+#     value_per_dollar = predicted_team_value / sum(base_salary, na.rm = TRUE),
+#     .groups = "drop"
+#   )
+```
+
+Why this model is appropriate
+
+This approach directly addresses the roster construction question by first estimating player-level returns to salary, then rolling them up to the team level.
+
+Model evaluation plan
+	•	Player-level predictive performance
+	•	Correlation between aggregated team value and observed team outcomes
+	•	Compare linear vs nonlinear salary effects
+
+Uncertainty plan
+	•	Bootstrap the player-to-team pipeline
+	•	Confidence bands by position
+
+# Results
+
+## Individual Analysis 1 Results
+
+```{r, include = FALSE}
+# TODO: tidy coefficient table / model summary
+# broom::tidy(fit_lm, conf.int = TRUE)
+
+# TODO: coefficient plot or fitted vs observed plot
+```
+
+We first estimated a baseline linear regression model relating team performance (goals added differential) to total payroll and salary concentration (top-three salary share).
+
+The model explains very little variation in team performance ($R^2$ = 0.019), and neither predictor is statistically significant. While the coefficient on log payroll is positive, suggesting higher-spending teams may perform slightly better, the estimate is highly uncertain ($p$ = 0.48). Similarly, the estimated effect of salary concentration is negative but imprecise ($p$ = 0.63).
+
+Overall, these results suggest that simple measures of payroll and salary concentration alone do not adequately explain variation in team performance in MLS.
+
+## Individual Analysis 2 Results
+
+```{r, include = FALSE}
+# TODO: summary(fit_gam)
+
+# TODO: plot smooth terms 
+```
+
+
+## Individual Analysis 3 Results
+
+#### TODO: salary-performance curve by position
+
+#### TODO: team value-per-dollar rankings with uncertainty bars
+
+Key interpretation: TODO
