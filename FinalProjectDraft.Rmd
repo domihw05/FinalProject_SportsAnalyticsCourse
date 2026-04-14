@@ -278,23 +278,67 @@ When pooling all seasons without controlling for year effects, salary variables 
 
 \newpage
 
-## Individual Analysis 2 (Nick Kourakis)
+## Individual Analysis 2: Roster Architecture (Nick Kourakis)
 
 ### Question
 
-Does team performance depend more on the salary disparity between highest and lowest paid starters, or on the amount of players earning $500k-$1.5M?
+Does team performance depend more on the salary disparity between highest and lowest paid starters, or on the the depth of it's TAM-eligible[^1] roster?
 
+[^1]: TAM (Targeted Allocation Money) Players: The MLS "middle class," consisting of high-level starters earning above the Maximum Salary Budget Charge ($803,125) but below the Designated Player threshold. These players' budget hits are "bought down" using league-allocated funds. See the official documentation [here](https://www.mlssoccer.com/news/major-league-soccer-unveils-club-roster-profiles-following-2026-roster-compliance#:~:text=A%20TAM%20Player%20is%20a,are%20static%20as%20of%20Feb.).
 
 ### Model specification
 
+#### Baseline Model
+
+$$
+xGD_{it} = \beta_0 + \beta_1 Gini_{it} + \varepsilon_{it}
+$$
+
+#### Dispersion Model
+
+$$xGD_{it} = \beta_0 + \beta_1 \text{Gini}_{it} + \beta_2 \text{MidClassDepth}_{it} + \beta_3 \log(\text{TotalSalary}_{it}) + \varepsilon_{it}$$
+
+Evaluates the importance of TAM players, controlling for total team spending.
+
+#### Multi Season Roster Model
+
+$$xGD_{it} = \beta_1 \text{Gini}_{it} + \beta_2 \text{MidClassDepth}_{it} + \alpha_i + \gamma_t + \varepsilon_{it}$$
+
+Within a specific team over several years, does performance improve when that specific team moves toward a more balanced roster?
+
 ### Assumptions
+
+	•	Linearity
+	•	No Multicollinearity
+	•	Independence
+
 
 ### Why this model is appropriate
 
+Due to the MLS salary cap, every dollar spent 
+on a "Star" is a dollar that could've been used somewhere else on the roster. The previous analysis 
+evaluates spending efficiency, this model tests the roster structure. By using the Gini 
+coefficient and TAM-depth, we can determine if success comes from a roster that is top-heavy (high inequality) or from a deep roster (high middle-class density).
+
+
 ### Model evaluation plan
+
+	•	Adjusted $R^2$: To measure how much additional variance in xGD is explained 
+	by roster distribution compared to a baseline model.
+	•	Akaike Information Criterion (AIC): To determine if adding "Middle Class" 
+	complexity improves model fit without over-fitting.
+	•	Coefficient Analysis: Evaluating the significance of $\beta_1$ (Gini) to 
+	identify whether inequality is correlated with performance.
+
 
 ### Uncertainty plan
 
+	•	95% confidence intervals: To verify that the effects of Gini and TAM-depth are
+	statistically distinguishable from zero.
+	•	Clustered Standard Errors: Grouped by team_id to account for correlation in
+	performance across multiple seasons.
+	•	Sensitivity Analysis: Testing the model with and without extreme salary outliers. 
+	
 \newpage
 
 ## Individual Analysis 3 (Brendan Flynn)
