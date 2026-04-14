@@ -158,17 +158,6 @@ ggplot(position_salary, aes(x = factor(team_id), y = pos_share, fill = position)
     y = "Share of Payroll"
   ) +
   theme(axis.text.x = element_blank())
-
-pos_perf <- team_model_data |>
-  left_join(position_wide, by = "team_id")
-
-pos_perf <- plot_data |>
-  left_join(position_wide, by = "team_id")
-
-ggplot(pos_perf, aes(x = F, y = goals_added_dif)) +  # adjust column name
-  geom_point() +
-  geom_smooth(method = "lm") +
-  labs(title = "Attacker Spending vs Performance")
 ```
 
 EDA takeaway: TODO
@@ -201,13 +190,41 @@ Does team performance increase with total payroll, and does salary concentration
 
 ```{r}
 model1 <- lm(
-  goals_added_dif ~ log_salary + top3_share + dp_count + u22_count + roster_model,
+  xgd ~ log_salary + dp_salary_share + u22_count +
+        log_salary:dp_salary_share,
   data = team_model_data
 )
 
 summary(model1)
 
 broom::tidy(model1, conf.int = TRUE)
+```
+
+```{r}
+gam1 <- gam(
+  xgd ~ s(log_salary, k = 4) + s(dp_salary_share, k = 4) + s(top3_share,k=4) + u22_count ,
+  data = team_model_data,
+  method = "REML"
+)
+
+summary(gam1)
+
+plot(gam1,pages = 1, residuals = TRUE)
+gam.check(gam1)
+```
+
+```{r}
+player_season <- player_season |>
+  mutate(predicted_value = predict(fit_player_gam, newdata = player_season))
+
+team_efficiency <- player_season |>
+  group_by(team_id) |>
+  summarize(
+    predicted_team_value = sum(predicted_value, na.rm = TRUE),
+    total_salary = sum(base_salary, na.rm = TRUE),
+    value_per_dollar = predicted_team_value / total_salary,
+    .groups = "drop"
+  )
 ```
 
 ### Assumptions
@@ -326,6 +343,8 @@ all_players <- asa_client$players
 
 asa_client$LEAGUES
 
+seasons <- 2015:2025
+
 # Load Roster Construction Data
 mls_roster_construction <- read.csv('Updated_MLS_Roster_Construction_2025.csv')
 ```
@@ -368,10 +387,19 @@ Describe any major cleaning steps here
 # TEAM-LEVEL OUTCOME DATA
 # -------------------------
 
-team_performance <- asa_goals_added_tall |>
+# Team performance outcome: expected goal differential
+asa_team_xgoals_tall <- asa_client$get_team_xgoals(
+    leagues = "mls",
+    season_name = 2025
+  ) |>
+  left_join(teams, by = "team_id")
+
+team_performance <- asa_team_xgoals_tall |>
   group_by(team_id, team_name) |>
   summarize(
-    goals_added_dif = sum(goals_added_for - goals_added_against, na.rm = TRUE),
+    xg_for = sum(xgoals_for, na.rm = TRUE),
+    xg_against = sum(xgoals_against, na.rm = TRUE),
+    xgd = xg_for - xg_against,
     .groups = "drop"
   )
 
@@ -406,6 +434,17 @@ efficiency_features <- mls_salaries_2025 |>
     salary_variance = var(base_salary, na.rm = TRUE),
     median_salary = median(base_salary, na.rm = TRUE),
     low_salary_share = mean(base_salary < 200000, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# identify top dp_count players per team
+dp_salary_feature <- mls_salaries_2025 |>
+  group_by(team_id) |>
+  arrange(desc(base_salary), .by_group = TRUE) |>
+  mutate(rank = row_number()) |>
+  left_join(roster_rules_clean, by = "team_id") |>
+  summarize(
+    dp_salary_share = sum(base_salary[rank <= dp_count], na.rm = TRUE) / sum(base_salary),
     .groups = "drop"
   )
 
@@ -542,7 +581,68 @@ team_model_data <- team_performance |>
     u22_per_roster = u22_count / roster_size
   )
 
+team_model_data <- team_model_data |>
+  left_join(dp_salary_feature, by = "team_id")
+
 team_model_data |>
   select(team_id, team_name, roster_model, dp_count, u22_count) |>
   print(n = Inf)
+```
+
+```{r}
+# -------------------------
+# MULTI-SEASON TEAM PANEL
+# -------------------------
+
+# Team xG by season
+asa_team_xgoals_panel <- asa_client$get_team_xgoals(
+  leagues = "mls",
+  season_name = seasons,
+  split_by_seasons = TRUE
+) |>
+  left_join(teams, by = "team_id")
+
+team_performance_panel <- asa_team_xgoals_panel |>
+  group_by(team_id, team_name, season_name) |>
+  summarize(
+    xg_for = sum(xgoals_for, na.rm = TRUE),
+    xg_against = sum(xgoals_against, na.rm = TRUE),
+    xgd = xg_for - xg_against,
+    .groups = "drop"
+  )
+
+# Salary data across all seasons
+mls_salaries_panel <- asa_client$get_player_salaries(
+  leagues = "mls",
+  season_name = seasons
+) |>
+  left_join(players, by = "player_id")
+
+team_salary_panel <- mls_salaries_panel |>
+  group_by(team_id, season_name) |>
+  summarize(
+    total_salary = sum(base_salary, na.rm = TRUE),
+    roster_size = n(),
+    .groups = "drop"
+  )
+
+salary_concentration_panel <- mls_salaries_panel |>
+  group_by(team_id, season_name) |>
+  arrange(desc(base_salary), .by_group = TRUE) |>
+  mutate(rank = row_number()) |>
+  summarize(
+    top3_salary = sum(base_salary[rank <= 3], na.rm = TRUE),
+    team_salary_tmp = sum(base_salary, na.rm = TRUE),
+    top3_share = top3_salary / team_salary_tmp,
+    .groups = "drop"
+  ) |>
+  select(team_id, season_name, top3_share)
+
+panel_team_data <- team_performance_panel |>
+  left_join(team_salary_panel, by = c("team_id", "season_name")) |>
+  left_join(salary_concentration_panel, by = c("team_id", "season_name")) |>
+  mutate(
+    log_salary = log(total_salary),
+    season_name = factor(season_name)
+  )
 ```

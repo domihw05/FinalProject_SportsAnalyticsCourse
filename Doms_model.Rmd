@@ -49,32 +49,9 @@ This provides a simple, interpretable baseline model linking roster spending str
 
 ## Individual Analysis 2: GAM / nonlinear team model
 
-Question
+Initial models focused on explaining team performance (xGD) using linear regression with payroll and roster construction variables, including total salary (log_salary), salary concentration (top3_share), DP usage (dp_count or dp_salary_share), U22 usage (u22_count), and roster model classifications. Early specifications suffered from multicollinearity—particularly between top3_share, dp variables, and roster_model—and produced weak explanatory power. Re-specifying the model using xGD instead of goals added improved fit modestly, and simplifying the feature set to focus on allocation variables (especially dp_salary_share) yielded more interpretable coefficients, though statistical significance remained limited.
 
-Are the effects of payroll and salary concentration nonlinear?
-
-Model specification
-
-```{r, include = FALSE}
-#fit_gam <- gam(
-#xgd_per_90 ~ s(log(total_payroll)) + s(top3_salary_share) + s(attacker_share) + s(defender_share),
-#data = team_season,
-#method = "REML"
-)
-```
-
-Why this model is appropriate
-
-A GAM allows the relationship between spending and performance to be flexible rather than forcing a strictly linear effect.
-
-Model evaluation plan
-	•	Compare against linear regression
-	•	Check effective degrees of freedom
-	•	Out-of-sample prediction error
-
-Uncertainty plan
-	•	Confidence bands for smooth terms
-	•	Bootstrap uncertainty if needed
+To test whether nonlinear effects were masking relationships, a generalized additive model (GAM) was fit with smooth terms on key variables. However, all smooth terms had effective degrees of freedom near 1, indicating no meaningful nonlinearity and confirming that a linear structure was appropriate. Given this, the final step was to introduce a single, theory-driven interaction between log_salary and dp_salary_share (Model 3). This specification tests whether the effectiveness of overall spending depends on how much of that spending is concentrated in DP-level players, aligning directly with MLS roster construction mechanisms while avoiding overfitting from excessive interactions.
 
 
 ## Individual Analysis 3: Player-level value model
