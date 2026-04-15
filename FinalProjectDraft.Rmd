@@ -23,21 +23,36 @@ library(broom.mixed)
 library(lubridate)
 
 # EDA objects
-mls_salaries_2025 <- readRDS("Data/mls_salaries_2025.rds")
-team_model_data <- readRDS("Data/team_model_data.rds")
-position_salary <- readRDS("Data/position_salary.rds")
+mls_salaries_2025 <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/mls_salaries_2025.rds"))
+)
+
+team_model_data <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/team_model_data.rds"))
+)
+
+position_salary <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/position_salary.rds"))
+)
 
 # Model objects
-panel_team_model <- readRDS("Models/panel_team_model.rds")
-fit_player_gam <- readRDS("Models/fit_player_gam.rds")
-team_efficiency_model <- readRDS("Models/team_efficiency_model.rds")
-team_efficiency_model_ml <- readRDS("Models/team_efficiency_model_ml.rds")
+mls_salaries_2025 <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/mls_salaries_2025.rds"))
+)
+
+team_model_data <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/team_model_data.rds"))
+)
+
+position_salary <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/position_salary.rds"))
+)
 
 # Optional final datasets if needed for extra plots
-panel_team_data <- readRDS("Models/panel_team_data.rds")
-player_season <- readRDS("Models/player_season.rds")
-team_efficiency_model_data <- readRDS("Models/team_efficiency_model_data.rds")
-team_efficiency_model_ml_ext2 <- readRDS("Models/team_efficiency_model_ml_ext2.rds")
+#panel_team_data <- readRDS("Models/panel_team_data.rds")
+#player_season <- readRDS("Models/player_season.rds")
+#team_efficiency_model_data <- readRDS("Models/team_efficiency_model_data.rds")
+#team_efficiency_model_ml_ext2 <- readRDS("Models/team_efficiency_model_ml_ext2.rds")
 ```
 
 # Abstract
@@ -383,7 +398,7 @@ coefficient and TAM-depth, we can determine if success comes from a roster that 
 
 Tables summarizing all model outputs are shown below. We compare models using fit ($R^2$) and predictive error, and focus on how conclusions change as we move from simple payroll measures to player-level value and multilevel structure.
 
-```{r, echo = FALSE}
+```{r, eval = FALSE, echo = FALSE}
 # -------------------------
 # Baseline + Main LM tables
 # -------------------------
@@ -530,8 +545,235 @@ These results are consistent across model specifications and robust to team-leve
 ## Individual Analysis 2 Results (Nick)
 
 
-## Individual Analysis 3 Results (Flynn)
+## Individual Analysis 3: Positional Spending (Flynn)
 
+#### Question
+  Does the allocation of salary across positions affect team performance? In particular, do teams that spend a larger share of payroll on attacking players, midfielders, defenders, or goalkeepers perform differently on average?
+  
+#### Model Specification
+  While total payroll measures the overall financial resources a team invests into their roster, teams vary drastically in what positions they invest more heavily into. Some teams may prioritize investing heavily into forwards who are generally most responsible for increasing the expected goals of a team but also garner a higher salary. Other teams may prioritize a more balanced spending strategy, spreading spending out across positions. 
+  
+#### Baseline Model
+
+$$
+xGD_{it} =
+\beta_0 +
+\beta_1 FShare_{it} +
+\beta_2 MShare_{it} +
+\beta_3 DShare_{it} +
+\beta_4 \log(Payroll_{it}) +
+\gamma_t +
+\varepsilon_{it}
+$$
+
+#### Assumptions
+- Linearity
+- Independence
+- No Multicollinearity
+- Homoskedasticity
+
+#### Why this model is appropriate
+This regression framework directly addresses the central research question by estimating the marginal effect of reallocating payroll across positions. By including total payroll in the model, we separate the overall level of spending and the distribution of spending across positions. Season fixed effects further control for league-wide changes such as rule changes, league expansion, or shifts in playing style over time. Evaluates whether teams that allocate a larger share of payroll to forwards, midfielders, or defenders perform differently on average, while controlling for season-level effects.
+
+#### Model Evaluation Plan
+Model performance will be evaluated using several metrics:
+
+- Coefficient significance tests to determine whether positional spending shares are associated with team performance
+- R-squared and adjusted R-squared to evaluate the proportion of variation in expected goal differential explained by the model
+- Residual diagnostics to check for violations of model assumptions
+
+#### Uncertainty Plan
+- standard errors and confidence intervals for regression coefficients
+- hypothesis testing using t-statistics and p-values
+- sensitivity checks with alternative specification
+
+### Clustering Approach
+
+#### Model Specification
+In addition to the regression model, a clustering approach is used to identify common payroll allocation strategies among MLS teams. Each team-season observation is represented by four features: Forward salary share, Midfielder salary share, Defender salary share, and Goalkeeper salary share. A k-means clustering algorithm groups teams into clusters based on these salary allocation profiles. The algorithm minimizes within-cluster variation in payroll allocation patterns.
+
+#### Assumptions
+- Teams with similar salary allocation profiles represent similar roster construction strategies.
+- Euclidean distance between salary shares appropriately captures similarity between teams.
+- The selected number of clusters adequately represents the underlying strategies present in the data.
+
+#### Why this model is appropriate
+While regression analysis estimates marginal effects of salary allocation, clustering identifies distinct team-building strategies present in the league. This approach allows us to examine whether teams that emphasize different positional spending strategies exhibit different performance outcomes.
+
+#### Model Evaluation Plan
+Cluster quality will be evaluated using:
+- cluster sizes and stability
+- visual inspection of cluster centers
+- comparison of average team performance across clusters
+
+#### Uncertainty Plan
+Uncertainty in the clustering results will be addressed by:
+
+testing alternative numbers of clusters
+examining the robustness of cluster centers
+comparing performance differences across clusters
+
+```{r, include = FALSE,eval=FALSE}
+
+# Summarize payroll by team, season, and position
+pos_salary <- mls_salaries_panel %>%
+  group_by(team_id, season_name, position) %>%
+  summarise(
+    pos_salary = sum(guaranteed_compensation, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+team_payroll <- mls_salaries_panel %>%
+  group_by(team_id, season_name) %>%
+  summarise(
+    payroll = sum(guaranteed_compensation, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(season_name = as.character(season_name))
+
+# Compute total payroll and salary shares
+pos_share <- pos_salary %>%
+  group_by(team_id, season_name) %>%
+  mutate(
+    total_salary = sum(pos_salary),
+    share = pos_salary / total_salary
+  ) %>%
+  ungroup() %>%
+  select(team_id, season_name, position, share)
+
+
+# Reshape to wide format
+pos_share_wide <- pos_share %>%
+  pivot_wider(
+    names_from = position,
+    values_from = share,
+    names_prefix = "",
+    values_fill = 0
+  ) %>%
+  rename(
+    FShare = F,
+    MShare = M,
+    DShare = D,
+    GKShare = GK
+  )
+
+```
+
+```{r, include = FALSE,eval=FALSE}
+pos_share_wide2 <- pos_share_wide %>%
+  mutate(season_name = as.character(season_name))
+
+regression_data <- asa_team_xgoals_panel %>%
+  select(team_id, season_name, xgoal_difference) %>%
+  left_join(pos_share_wide2, by = c("team_id", "season_name"))
+
+regression_data <- regression_data %>%
+  left_join(team_payroll, by = c("team_id", "season_name"))
+regression_data <- regression_data %>%
+  mutate(log_payroll = log(payroll))
+
+model2 <- lm(
+  xgoal_difference ~ MShare + DShare + GKShare + log_payroll + factor(season_name),
+  data = regression_data
+)
+
+summary(model2)
+```
+
+```{r, include = FALSE,eval=FALSE}
+regression_data <- regression_data %>%
+  mutate(
+    attack_share = FShare + MShare,
+    defense_share = DShare + GKShare
+  )
+
+model3 <- lm(
+  xgoal_difference ~ attack_share + log_payroll + factor(season_name),
+  data = regression_data
+)
+
+summary(model3)
+```
+
+```{r, include = FALSE,eval=FALSE}
+#Clustered Data
+cluster_data <- pos_share_wide %>%
+  select(team_id, season_name, FShare, MShare, DShare, GKShare)
+
+set.seed(2026)
+
+clusters <- kmeans(
+  cluster_data %>% select(FShare, MShare, DShare, GKShare),
+  centers = 4,
+  nstart = 25
+)
+
+cluster_data$cluster <- clusters$cluster
+
+cluster_data <- cluster_data %>%
+  mutate(season_name = as.character(season_name))
+
+cluster_data <- cluster_data %>%
+  left_join(
+    asa_team_xgoals_panel %>%
+      select(team_id, season_name, xgoal_difference),
+    by = c("team_id", "season_name")
+  )
+```
+
+```{r, include = FALSE, eval=FALSE}
+cluster_results <- cluster_data %>%
+  filter(!is.na(xgoal_difference)) %>%
+  group_by(cluster) %>%
+  summarise(
+    avg_xGD = mean(xgoal_difference),
+    sd_xGD = sd(xgoal_difference),
+    teams = n()
+  )
+
+cluster_results
+```
+
+```{r, include = FALSE, eval=FALSE}
+#Visualize the clusters
+clusters$centers
+```
+
+
+```{r, include = FALSE, eval=FALSE}
+library(ggplot2)
+
+ggplot(cluster_data, aes(x = FShare, y = DShare, color = factor(cluster))) +
+  geom_point(size = 2, alpha = 0.7) +
+  labs(
+    title = "MLS Roster Construction Clusters",
+    subtitle = "Teams grouped by payroll allocation across positions",
+    x = "Forward Salary Share",
+    y = "Defender Salary Share",
+    color = "Cluster"
+  ) +
+  theme_minimal()
+```
+
+
+```{r, include = FALSE, eval=FALSE}
+cluster_centers <- as.data.frame(clusters$centers)
+cluster_centers$cluster <- factor(1:nrow(cluster_centers))
+
+cluster_centers_long <- cluster_centers %>%
+  pivot_longer(-cluster, names_to = "Position", values_to = "Share")
+
+ggplot(cluster_centers_long, aes(Position, Share, group = cluster, color = cluster)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  labs(
+    title = "Roster Construction Strategies in MLS",
+    x = "Position",
+    y = "Average Salary Share",
+    color = "Cluster"
+  ) +
+  theme_minimal()
+```
 
 
 # Discussion
@@ -562,7 +804,7 @@ all_players <- asa_client$players
 asa_client$LEAGUES
 
 # Load Roster Construction Data
-mls_roster_construction <- read.csv('Updated_MLS_Roster_Construction_2025.csv')
+mls_roster_construction <- read.csv('Data/Updated_MLS_Roster_Construction_2025.csv')
 ```
 
 ```{r, include = FALSE,eval=FALSE}
