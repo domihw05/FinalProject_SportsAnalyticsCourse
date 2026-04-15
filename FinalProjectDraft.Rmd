@@ -40,17 +40,21 @@ team_efficiency_model_data <- readRDS("Models/team_efficiency_model_data.rds")
 team_efficiency_model_ml_ext2 <- readRDS("Models/team_efficiency_model_ml_ext2.rds")
 ```
 
+# Abstract
+
+Major League Soccer runs under strict salary and roster rules, but teams still vary a lot in how well they perform. This project looks at how teams spend their money and whether different roster construction strategies actually lead to better results. Using publicly available MLS salary and performance data, we study how total payroll, salary distribution, and positional spending relate to outcomes like expected goal differential and points per game. We compare several statistical models that each capture a different view of roster construction. Across these approaches, we find that spending more does not guarantee success. Instead, teams that get more performance out of their salary tend to perform better. This suggests that efficiency, not just spending, is the main driver of success in MLS.
+
 # Introduction
 
-Major League Soccer operates under a complex roster-building system, yet teams vary widely in on-field performance. 
+Major League Soccer is designed to promote parity. Teams operate under a salary cap and a set of roster rules that limit how much they can spend and how they can build their teams. Even with these constraints, there is still a large gap in performance across teams. Some teams consistently compete at the top of the table, while others struggle. This raises a simple but important question about how teams are using their limited resources. 
 
 ## Problem Statement
 
-MLS teams operate under strict roster and salary constraints, yet there is no clear empirical consensus on which roster construction strategies lead to success.
+MLS teams all face similar financial constraints, but they make very different decisions about how to allocate salary across players and positions. There is no clear empirical answer for which of these strategies actually leads to better performance. Some teams concentrate spending on a few high-paid players, while others spread salary more evenly across the roster.
 
 ## Why This Matters
 
-Understanding how teams should allocate limited salary budget is critical for competitive strategy in a capped league like MLS.
+In a capped league, every dollar matters. Poor allocation decisions can limit a team’s ability to compete, while efficient spending can create an advantage even without a higher budget. From a sports analytics perspective, this is a broader question about how to allocate limited resources in a way that maximizes output. Understanding this relationship can help explain why some teams outperform others despite similar constraints.
 
 ## Research Question
 
@@ -62,43 +66,47 @@ We use publicly available MLS salary and performance data to evaluate multiple s
 
 ## Preview of Results
 
-Team success in MLS is not determined by how much teams spend, but by how efficiently they convert salary into player performance.
+Our results show that higher payroll alone does not explain team success. Instead, the key factor is how efficiently teams convert salary into player performance. Teams that get more value out of their spending tend to perform better than teams that simply spend more.
 
 # Data
 
 We combine MLS salary information with team- and player-level performance data.
-	•	Salary data: TODO
-	•	Team performance data: TODO
-	•	Player performance data: TODO
-	•	Seasons included: TODO
+
+- Salary data: TODO
+- Team performance data: TODO
+- Player performance data: TODO
+- Seasons included: TODO
 
 ## Unit of analysis
 
 We use two related units of analysis depending on the model:
-	•	Team-season for team-level models
-	•	Player-season for player-level models
+
+- Team-season for team-level models
+- Player-season for player-level models
 
 ## Variables
 
-#### Outcome Variables
+### Outcome Variables
 
 Potential response variables include:
-	•	Team expected goal differential (xGD)
-	•	Team goals added differential (g+ diff)
-	•	Points per game
-	•	Player goals added (g+)
-	•	Minutes-adjusted player contribution
 
-#### Predictors
+- Team expected goal differential (xGD)
+- Team goals added differential (g+ diff)
+- Points per game
+- Player goals added (g+)
+- Minutes-adjusted player contribution
+
+### Predictors
 
 Potential explanatory variables include:
-	•	Total payroll
-	•	Log payroll
-	•	Share of payroll spent on top 3 players
-	•	Salary concentration index (Gini / HHI)
-	•	Positional spending shares
-	•	Average age / experience (if available)
-	•	Designated player indicators (if available)
+
+- Total payroll
+- Log payroll
+- Share of payroll spent on top 3 players
+- Salary concentration index (Gini / HHI)
+- Positional spending shares
+- Average age / experience (if available)
+- Designated player indicators (if available)
 
 ## Data Cleaning Overview
 
@@ -112,10 +120,9 @@ We construct a team-level dataset by aggregating player-level salary and perform
 
 These transformations allow us to map individual salary structures to team-level outcomes.
 
-
 # Exploratory Data Analysis (EDA)
 
-### Salary distribution
+## Salary distribution
 
 ```{r, echo = FALSE}
 ggplot(mls_salaries_2025, aes(x = base_salary)) +
@@ -132,13 +139,13 @@ ggplot(mls_salaries_2025, aes(x = log(base_salary))) +
        y = "Count")
 ```
 
-#### Takeaway
+## Takeaway
 
 Salaries are highly right-skewed, meaning a small number of players earn disproportionately high salaries and suggesting a star-driven league structure.
 
-### Team Payroll vs Team Performance
+## Team Payroll vs Team Performance
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, message = FALSE}
 plot_data <- team_model_data
 
 ggplot(plot_data, aes(x = log_salary, y = xgd)) +
@@ -151,13 +158,13 @@ ggplot(plot_data, aes(x = log_salary, y = xgd)) +
   )
 ```
 
-#### Takeaway
+### Takeaway
 
 We see a weak/moderate positive relationship (likely). Payroll alone does not fully explain performance, which motivates out decision to add roster structure variables.
 
-### Salary concentration vs team performance
+## Salary concentration vs team performance
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, message = FALSE}
 concentration_plot_data <- team_model_data
 
 ggplot(concentration_plot_data, aes(x = top3_share, y = xgd)) +
@@ -170,11 +177,11 @@ ggplot(concentration_plot_data, aes(x = top3_share, y = xgd)) +
   )
 ```
 
-#### Takeaway
+### Takeaway
 
 The regression line is essentially flat. Confidence band is wide. Points are highly scattered. No visible monotonic trend.
 
-### Positional Allocation Patterns
+## Positional Allocation Patterns
 
 ```{r, echo = FALSE}
 ggplot(position_salary, aes(x = factor(team_id), y = pos_share, fill = position)) +
@@ -186,8 +193,6 @@ ggplot(position_salary, aes(x = factor(team_id), y = pos_share, fill = position)
   ) +
   theme(axis.text.x = element_blank())
 ```
-
-EDA takeaway: TODO
 
 ```{r, echo = FALSE}
 ggplot(concentration_plot_data,
@@ -215,23 +220,31 @@ Does team performance increase with total payroll, and does salary concentration
 
 ### Model specification
 
+We model team performance using expected goal differential (xGD) at the team-season level. We begin with a simple baseline model and progressively build toward richer specifications that incorporate player-level contributions and roster construction features.
+
 #### Baseline Model
 
 $$
-xGD_{it} = \beta_0 + \beta_1 \log(\text{Salary}_{it}) + \gamma_t + \varepsilon{it}
+xGD_{it} = \beta_0 + \beta_1 \log(\text{Salary}_{it}) + \gamma_t + \varepsilon_{it}
 $$
+
+This model tests whether total payroll alone explains variation in team performance, controlling for season-level effects.
 
 #### Player Level GAM
 
 $$
-GAAR_{ijt} = f(\log(\text{Salary}_{ijt})) + \delta{pos(j)} + f_{pos(j)}(\log(\text{Salary}_{ijt})) + \varepsilon_{ijt}
+GAAR_{ijt} = f(\log(\text{Salary}_{ijt})) + \delta_{\text{pos}(j)} + f_{\text{pos}(j)}(\log(\text{Salary}_{ijt})) + \varepsilon_{ijt}
 $$
+
+We estimate a nonlinear relationship between salary and player value (goals added above replacement), allowing this relationship to vary by position.
 
 #### Team Level Construction
 
 $$
 \widehat{V}{it} = \sum_{j \in i,t} \widehat{GAAR}_{ijt} \cdot \frac{\text{Minutes}_{ijt}}{90}
 $$
+
+We aggregate predicted player contributions to construct a team-level measure of roster value.
 
 #### Team Efficiency Model
 
@@ -240,41 +253,48 @@ xGD_{it} = \beta_0 + \beta_1 \widehat{V}_{it} + \beta_2 \text{Salary}_{it} + \be
 + \beta_4 \text{PctAtt}_{it} +\beta_5 \text{PctMid}_{it} + \gamma_t + \varepsilon_{it}
 $$
 
+This model separates total spending from how effectively that spending translates into player performance.
+
 #### Team Multilevel Model
 
-$$
 \begin{align*}
 xGD_{it} &= \beta_0 + \beta_1 \,\text{Value}_{it} + \beta_2 \,\text{Salary}_{it} + \beta_3 \,\text{Age}_{it} \\
 &\quad + \beta_4 \,\text{Top3Share}_{it} + \beta_5 \,\text{U22}_{it} \\
 &\quad + \beta_6 \,\text{ForwardShare}_{it} + \beta_7 \,\text{MidfieldShare}_{it} \\
 &\quad + u_i + \epsilon_{it}
 \end{align*}
-$$
+
+We include team-level random effects to account for unobserved differences across teams that persist over time.
 
 ### Assumptions
-	•	Linearity
-	•	Independence across team-seasons
-	•	Constant variance
-	•	Limited omitted variable bias
+
+Across models, we assume:
+
+- Linearity in parameters for the regression components
+- Errors satisfy $\varepsilon_{it} \sim \mathcal{N}(0, \sigma^2)$
+- Independence across team-seasons (conditional on covariates and fixed/random effects)
+- Constant variance of errors
+- Limited omitted variable bias after including key roster and season controls
+
+For the multilevel model, we additionally assume:
+
+- Random effects follow $u_i \sim \mathcal{N}(0, \tau^2)$ and are independent of $\varepsilon_{it}$
 
 ### Why this model is appropriate
 
-This provides a simple, interpretable baseline model linking roster spending strategy to performance.
+This modeling approach directly matches the project question by separating two effects: how much teams spend and how efficiently they convert that spending into performance. The baseline model provides a simple benchmark, while the extended models incorporate roster construction features and player-level estimates. The GAM allows for flexibility in the salary-performance relationship at the player level, which avoids imposing a strict linear assumption. The multilevel model accounts for persistent team-level differences that are not captured by observed variables.
 
 ### Model evaluation plan
 
-	•	RMSE / MAE
-	•	Residual diagnostics
-	•	Compare alternative predictor sets
+We evaluate model performance using RMSE and MAE to measure predictive accuracy. We also compare models across different specifications to assess whether adding roster construction variables improves explanatory power. Residual diagnostics are used to check for violations of model assumptions, including nonlinearity and heteroskedasticity. This comparison framework allows us to determine whether more complex models provide meaningful improvements over simpler baselines.
 
 ### Uncertainty plan
 
-	•	95% confidence intervals for coefficients
-	•	Optional bootstrap confidence intervals
+We quantify uncertainty using 95% confidence intervals for all estimated coefficients. These intervals provide a measure of statistical significance and effect size. For robustness, we also consider bootstrap confidence intervals, which are less sensitive to model assumptions and provide a nonparametric check on inference. In the multilevel model, uncertainty in both fixed and random effects is accounted for through the estimated variance components.
 	
 ### SIDE NOTES DOM
 
-When pooling all seasons without controlling for year effects, salary variables are not statistically significant. However, once season fixed effects are introduced, total payroll becomes a significant predictor of team performance. This suggests that cross-season structural changes in MLS—such as salary cap growth and evolving roster rules—obscure the relationship between spending and performance when not properly controlled for.
+When pooling all seasons without controlling for year effects, salary variables are not statistically significant. After introducing season fixed effects, total payroll becomes significant. This suggests that league-wide changes, such as salary cap growth and evolving roster rules, confound the relationship between spending and performance if not properly controlled for.
 
 \newpage
 
@@ -361,6 +381,8 @@ coefficient and TAM-depth, we can determine if success comes from a roster that 
 
 ## Individual Analysis 1 Results (Dom)
 
+Tables summarizing all model outputs are shown below. We compare models using fit ($R^2$) and predictive error, and focus on how conclusions change as we move from simple payroll measures to player-level value and multilevel structure.
+
 ```{r, echo = FALSE}
 # -------------------------
 # Baseline + Main LM tables
@@ -445,23 +467,29 @@ knitr::kable(
 
 #### Baseline Model
 
-We first estimated a baseline linear regression model relating team performance (goals added differential) to total payroll and salary concentration (top-three salary share). The model explains very little variation in team performance ($R^2 \approx 0.02$), and neither predictor is statistically significant. While the coefficient on log payroll is positive, the estimate is highly uncertain, and salary concentration also shows no clear relationship with performance.
+The baseline model explains very little variation in team performance ($R^2 \approx 0.02$), and neither total payroll nor salary concentration is statistically significant. Confidence intervals for both coefficients are wide and include zero.
 
-Overall, these results suggest that simple measures of payroll and salary concentration alone do not adequately explain variation in team performance in MLS.
+This suggests that aggregate spending alone is not a meaningful predictor of team success.
 
 #### Player Level GAM
 
-At the player level, salary clearly translates into performance, but not in a simple linear way. The GAM shows strong nonlinear effects and meaningful differences across positions, with attackers and midfielders generating more value on average and exhibiting different salary-to-performance curves. This suggests that while spending more does generally increase individual performance, the returns are heterogeneous and exhibit diminishing effects depending on how salary is allocated across positions.
+At the player level, salary is clearly related to performance, but the relationship is nonlinear and varies by position. Higher salaries generally correspond to higher value, but with diminishing returns and different patterns across positions.
+
+This indicates that spending does matter, but its effectiveness depends on how it is allocated across players.
 
 #### Team Model LM
 
-At the team level, once player contributions are aggregated using minutes-weighted predicted value, performance becomes substantially more predictable. Teams with higher total player value perform significantly better, while total salary—holding value constant—has a negative and statistically significant effect. This indicates that spending alone does not drive success; rather, performance depends on how efficiently teams convert payroll into on-field production.
+Once player contributions are aggregated to the team level, results change substantially. Predicted player value is strongly positive and statistically significant, while total salary becomes negative and significant when holding value constant.
 
-Adding team-level controls such as age and roster composition does not change this core result. Predicted player value remains strongly positive and significant, and salary continues to have a negative conditional effect, reinforcing the idea that inefficiency in spending is detrimental to performance.
+This is the central result: teams that generate more value perform better, but conditional on value, higher spending is associated with worse outcomes. In other words, inefficient spending reduces performance.
+
+These results are stable after adding controls such as team age and roster composition.
 
 #### Multilevel Team Model
 
-Additional results provide further context. Team age has a negative and significant effect, suggesting older teams tend to perform worse even after controlling for value and spending, while roster composition variables do not have strong independent effects. A multilevel model incorporating team and season random effects confirms substantial unobserved heterogeneity, but the core findings remain unchanged: player value is strongly positively associated with performance, and salary is negatively associated once value is accounted for. This demonstrates that the main results are robust to differences across teams and seasons.
+The multilevel model accounts for persistent differences across teams. The main findings remain unchanged: player value is strongly positive, and salary retains a negative conditional effect. Random effects indicate meaningful variation across teams, but do not alter the core relationships.
+
+Among additional variables, age shows a negative effect, while positional spending and U22 share are not consistently significant.
 
 Then interpretation:
 	•	$\beta_1 > 0$: higher player value improves performance
@@ -484,19 +512,20 @@ Downplay
 - U22 proxy (data limitation)
 - Positional shares
 
-#### Answer to Research Question
+### Key Takeaways
 
-Across all modeling approaches, we find that team performance in MLS is not driven simply by total payroll or salary concentration, but rather by how effectively teams translate spending into on-field production.
+- Player value is the strongest predictor of team performance
+- Conditional on value, higher salary is associated with worse outcomes
+- Evidence for salary concentration is positive but less consistent
+- Little evidence that positional allocation or U22 spending independently drives results
 
-The baseline linear model shows that total payroll and salary concentration alone have weak explanatory power for team performance, with low $R^2$ and statistically insignificant coefficients. This suggests that aggregate spending levels do not meaningfully differentiate successful and unsuccessful teams.
+### Answer to Research Question
 
-At the player level, the generalized additive model (GAM) reveals a strong but nonlinear relationship between salary and performance, with substantial heterogeneity across positions. This indicates that while higher salaries are generally associated with better individual performance, the marginal returns to spending vary depending on how salary is allocated across players and positions.
+Across all models, team performance in MLS is not driven by how much teams spend, but by how efficiently they convert salary into production.
 
-When aggregating player-level predicted value to the team level, team performance becomes highly predictable. The team-level model shows that predicted player value is strongly positively associated with performance, while total salary, conditional on value, has a negative and statistically significant effect. This implies that inefficiency in spending—paying more for the same level of production—is detrimental to team success.
+The baseline model shows that payroll alone has little explanatory power. The player-level analysis shows that salary translates to performance, but in a nonlinear and position-dependent way. At the team level, performance is explained by total player value, while excess spending without additional value is associated with worse outcomes.
 
-Finally, the multilevel model confirms that these relationships are robust to unobserved heterogeneity across teams and seasons. The positive effect of player value and the negative conditional effect of salary persist even after accounting for random effects.
-
-Taken together, these results suggest that roster construction strategy in MLS is best understood through the lens of efficiency rather than scale. Successful teams are not necessarily those that spend the most, but those that allocate salary in a way that maximizes player value per dollar.
+These results are consistent across model specifications and robust to team-level heterogeneity. Overall, they suggest that efficient roster construction, rather than total spending, is the key determinant of success in MLS.
 
 ## Individual Analysis 2 Results (Nick)
 
