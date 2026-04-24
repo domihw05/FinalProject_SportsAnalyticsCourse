@@ -542,7 +542,7 @@ par(old_par)
 
 The player-level GAM shows that salary is related to goals added above replacement, but the relationship is not the same across positions. The overall salary smooth is positive, meaning that higher-paid players generally have higher predicted value. The position-specific smooths show how this overall salary effect is adjusted for defenders, forwards, and midfielders.
 
-For defenders and midfielders, the position-specific smooths decline as salary increases, suggesting that the salary-value relationship is weaker for those positions than the overall trend. For forwards, the partial effect decreases until roughly a log base salary of 14, or about $1.2 million, before increasing slightly at higher salaries. This suggests that salary is useful as a signal of player value, but the return to spending depends on positional context.
+For defenders and midfielders, the position-specific smooths decline as salary increases, suggesting that the salary-value relationship is weaker for those positions than the overall trend. For forwards, the partial effect decreases until roughly a log base salary of 14, or about $1.2 million, before increasing slightly at higher salaries. This suggests that salary is useful as a signal of player value, but the return to spending depends on positional context. Forwards are the exception: the partial effect recovers at salaries above roughly 1.2 million, making forwards the only position where premium spending shows increasing returns to value.
 
 These results support using predicted player value rather than raw salary in the team-level model. Payroll alone does not tell us whether a team is actually getting production from its spending, so the GAM helps translate player salaries into estimated on-field value before aggregating to the team-season level.
 
@@ -626,6 +626,8 @@ There is also some evidence that salary concentration may help, but this result 
 The results suggest that team performance in MLS is related to payroll, but not simply because spending more automatically produces better teams. At the team level, performance is explained more by predicted player value than by raw salary. Conditional on value, higher salary is associated with worse outcomes, suggesting that inefficient spending hurts roster construction.
 
 Salary concentration may help, but this result is less certain than the player value and salary findings. The GAM also suggests that salary does not translate into value in the same way across positions, which supports using predicted player value rather than raw payroll as the main roster-quality measure. However, the final multilevel model does not show clear independent effects for positional salary shares, so the main conclusion is about efficiency rather than simply shifting spending toward a specific position.
+
+Because predicted value absorbs positional differences by construction, the team-level model cannot isolate positional spending effects independently. The GAM results suggest these are not separate strategies — spending on high-salary forwards may be one of the more reliable ways to generate the roster value that drives team performance.
 
 Overall, efficient roster construction appears to matter more than total spending alone.
 
