@@ -56,6 +56,7 @@ team_efficiency_model_ml_ext2 <- readRDS("Models/team_efficiency_model_ml_ext2.r
 panel_team_model <- readRDS("Models/panel_team_model.rds")
 team_efficiency_model <- readRDS("Models/team_efficiency_model.rds")
 fit_player_gam <- readRDS("Models/fit_player_gam.rds")
+team_efficiency_model_data_ext <- readRDS("Data/team_efficiency_model_data_ext.rds")
 ```
 
 # Abstract
@@ -302,11 +303,11 @@ This modeling approach directly matches the project question by separating two e
 
 ### Model Evaluation Plan
 
-We evaluate model performance using RMSE and MAE to measure predictive accuracy. We also compare models across different specifications to assess whether adding roster construction variables improves explanatory power. Residual diagnostics are used to check for violations of model assumptions, including nonlinearity and heteroskedasticity. This comparison framework allows us to determine whether more complex models provide meaningful improvements over simpler baselines.
+I evaluate the model progression using in-sample RMSE and MAE as descriptive measures of predictive error. I compare simpler payroll-only and fixed-effect team models against the final multilevel model to assess whether adding player-value and roster-construction variables improves fit. I also use residual diagnostics to check for obvious violations of model assumptions, including nonlinearity and heteroskedasticity.
 
 ### Uncertainty Plan
 
-We quantify uncertainty using 95% confidence intervals for all estimated coefficients. These intervals quantify uncertainty around the estimated effects and help assess whether the data provide clear evidence of positive, negative, or near-zero relationships. For robustness, we also consider bootstrap confidence intervals, which are less sensitive to model assumptions and provide a nonparametric check on inference. In the multilevel model, uncertainty in both fixed and random effects is accounted for through the estimated variance components.
+I quantify uncertainty using 95% confidence intervals for the estimated coefficients. These intervals show how much uncertainty remains around each estimated effect and help assess whether the data provide clear evidence of positive, negative, or near-zero relationships. In the multilevel model, uncertainty in team-level heterogeneity is summarized through the estimated random-effect variance component.
 	
 ### Other Modeling Notes
 
@@ -397,28 +398,9 @@ coefficient and TAM-depth, we can determine if success comes from a roster that 
 
 ## Individual Analysis 1 Results (Dom)
 
-Tables summarizing all model outputs are shown below. We compare models using fit ($R^2$) and predictive error, and focus on how conclusions change as we move from simple payroll measures to player-level value and multilevel structure.
+The results below focus on the player-level GAM and the final multilevel model. The GAM is used to construct predicted player value, while the multilevel model is used for the main team-level inference.
 
-```{r, eval = FALSE, echo = FALSE}
-# -------------------------
-# Baseline + Main LM tables
-# -------------------------
-
-baseline_tbl <- broom::tidy(panel_team_model, conf.int = TRUE)
-main_tbl <- broom::tidy(team_efficiency_model, conf.int = TRUE)
-
-knitr::kable(
-  baseline_tbl,
-  digits = 3,
-  caption = "Baseline Team Model"
-)
-
-#knitr::kable(
-#  main_tbl,
-#  digits = 3,
-#  caption = "Main Team Efficiency Model"
-#)
-
+```{r, echo = FALSE}
 
 # -------------------------
 # GAM tables
@@ -426,19 +408,19 @@ knitr::kable(
 
 gam_param_tbl <- broom::tidy(fit_player_gam, parametric = TRUE)
 
-knitr::kable(
-  gam_param_tbl,
-  digits = 3,
-  caption = "Player-Level GAM: Parametric Terms"
-)
+#knitr::kable(
+# gam_param_tbl,
+#  digits = 3,
+#  caption = "Player-Level GAM: Parametric Terms"
+#)
 
 gam_smooth_tbl <- broom::tidy(fit_player_gam, parametric = FALSE)
 
-knitr::kable(
-  gam_smooth_tbl,
-  digits = 3,
-  caption = "Player-Level GAM: Smooth Terms"
-)
+#knitr::kable(
+#  gam_smooth_tbl,
+#  digits = 3,
+#  caption = "Player-Level GAM: Smooth Terms"
+#)
 
 
 # -------------------------
@@ -450,14 +432,26 @@ ml_fixed_tbl <- broom.mixed::tidy(
   effects = "fixed",
   conf.int = TRUE
 ) |>
+  select(term, estimate, std.error, p.value, conf.low, conf.high) |>
   mutate(
+    term = recode(
+      term,
+      `(Intercept)` = "Intercept",
+      pred_val_s = "Predicted roster value",
+      salary_s = "Total salary",
+      age_s = "Average age",
+      top3_share = "Top 3 salary share",
+      u22_proxy_count = "U22 proxy count",
+      share_F = "Forward salary share",
+      share_M = "Midfield salary share"
+    ),
     across(where(is.numeric), ~round(.x, 3))
   )
 
 knitr::kable(
   ml_fixed_tbl,
   digits = 3,
-  caption = "Extended Multilevel Model: Fixed Effects"
+  caption = "Final Multilevel Model: Fixed Effects"
 )
 
 
@@ -474,69 +468,166 @@ ran_pars_tbl <- broom.mixed::tidy(
     across(where(is.numeric), ~round(.x, 3))
   )
 
-knitr::kable(
-  ran_pars_tbl,
-  digits = 3,
-  caption = "Extended Multilevel Model: Random Effects"
-)
+#knitr::kable(
+#  ran_pars_tbl,
+#  digits = 3,
+#  caption = "Extended Multilevel Model: Random Effects"
+#)
 ```
 
-#### Baseline Model
+```{r, echo = FALSE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 6}
+old_par <- par(no.readonly = TRUE)
 
-The baseline model shows that payroll has a positive relationship with team performance after controlling for season effects. The coefficient on log salary is positive and statistically significant, which suggests that higher-spending teams tend to have better expected goal differential in the simplest model.
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1), oma = c(0, 0, 2, 0))
 
-However, this result is limited because the baseline model only measures how much a team spends. It does not tell us whether that spending is efficient, or whether the team is actually getting strong player production from its payroll.
+plot(
+  fit_player_gam,
+  select = 1,
+  shade = TRUE,
+  shade.col = "gray85",
+  seWithMean = TRUE,
+  scheme = 1,
+  xlab = "Log Base Salary",
+  ylab = "Partial Effect on GAAR",
+  main = "Overall Salary Smooth"
+)
+
+plot(
+  fit_player_gam,
+  select = 2,
+  shade = TRUE,
+  shade.col = "gray85",
+  seWithMean = TRUE,
+  scheme = 1,
+  xlab = "Log Base Salary",
+  ylab = "Partial Effect on GAAR",
+  main = "Salary Smooth: Defender"
+)
+
+plot(
+  fit_player_gam,
+  select = 3,
+  shade = TRUE,
+  shade.col = "gray85",
+  seWithMean = TRUE,
+  scheme = 1,
+  xlab = "Log Base Salary",
+  ylab = "Partial Effect on GAAR",
+  main = "Salary Smooth: Forward"
+)
+
+plot(
+  fit_player_gam,
+  select = 4,
+  shade = TRUE,
+  shade.col = "gray85",
+  seWithMean = TRUE,
+  scheme = 1,
+  xlab = "Log Base Salary",
+  ylab = "Partial Effect on GAAR",
+  main = "Salary Smooth: Midfielder"
+)
+
+mtext(
+  "Player-Level GAM Partial Effects",
+  outer = TRUE,
+  cex = 1.2,
+  font = 2
+)
+
+par(old_par)
+```
 
 #### Player Level GAM
 
-At the player level, salary is clearly related to performance, but the relationship is nonlinear and varies by position. Higher salaries generally correspond to higher goals added above replacement, but the returns are not constant across the salary distribution.
+The player-level GAM shows that salary is related to goals added above replacement, but the relationship is not the same across positions. The overall salary smooth is positive, meaning that higher-paid players generally have higher predicted value. The position-specific smooths show how this overall salary effect is adjusted for defenders, forwards, and midfielders.
 
-This matters because it suggests that spending can help, but only when salary is converted into actual player value. The same payroll amount can lead to different outcomes depending on which players and positions receive that money.
+For defenders and midfielders, the position-specific smooths decline as salary increases, suggesting that the salary-value relationship is weaker for those positions than the overall trend. For forwards, the partial effect decreases until roughly a log base salary of 14, or about $1.2 million, before increasing slightly at higher salaries. This suggests that salary is useful as a signal of player value, but the return to spending depends on positional context.
+
+These results support using predicted player value rather than raw salary in the team-level model. Payroll alone does not tell us whether a team is actually getting production from its spending, so the GAM helps translate player salaries into estimated on-field value before aggregating to the team-season level.
 
 #### Multilevel Team Model
 
-The multilevel model accounts for persistent differences across teams through a team random intercept. The main result is that predicted player value is strongly positive, while salary has a negative conditional effect after controlling for that value.
+The main result is that predicted player value is strongly positive ($\beta = 6.52, p < 0.001$), while total salary is negative conditional on value ($\beta = -6.01, p < 0.001$). These two predictors are correlated by construction; predicted value is derived from salary, so their coefficients should be interpreted jointly: teams that convert spending into production outperform teams that spend without generating value, not that spending itself is harmful.
 
-This is the key efficiency finding. Spending more is not necessarily bad, but spending more without producing additional player value is associated with worse performance. In other words, teams appear to benefit from efficient roster construction rather than payroll size alone.
+Salary concentration has a positive point estimate, but the confidence interval includes zero (95% CI: -0.44, 27.93), so this should be treated as suggestive rather than conclusive.
 
-Salary concentration also has a positive estimated effect. This suggests that top-heavy spending can help, although this result is less certain than the player value and salary effects. Average age is negative but should be treated as exploratory, while the U22 proxy and positional salary shares do not show clear independent effects.
+The primary finding is that efficient roster construction (converting salary into player value) matters more than total payroll. Positional salary shares and U22 investment do not show independent effects once predicted value and team heterogeneity are accounted for.
 
-Then interpretation:
-	•	$\beta_1 > 0$: higher player value improves performance
-	•	$\beta_2 < 0$: overpaying reduces performance
-	•	$\beta_4 > 0$: top-heavy salary structures improve outcomes
-	•	$\beta_5 \approx 0$: no clear U22 effect
-	•	$\beta_6, \beta_7 \approx 0$: no clear positional allocation effect
-	
-Emphasize (these are strong)
+### Model Comparison
 
-- Value vs salary (efficiency)
-- Top3 concentration effect
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+# Assumes your dataframe is team_season with columns:
+# xgd, pred_roster_value, log_salary, avg_age, top3_share, 
+# u22_count, fwd_share, mid_share, team, season
 
-Neutral / exploratory
+loo_results <- vector("numeric", nrow(team_efficiency_model_data_ext))
 
-- Age
+for (i in seq_len(nrow(team_efficiency_model_data_ext))) {
+  
+  train <- team_efficiency_model_data_ext[-i, ]
+  test  <- team_efficiency_model_data_ext[i, ]
+  
+  fit <- lmer(
+    xgd ~ pred_val_s + salary_s + age_s + top3_share + u22_proxy_count +
+      share_F + share_M + (1 | team_id),
+    data = train
+  )
+  
+  # Use fixed effects only for held-out prediction
+  # (team random effect may not exist for unseen teams)
+  pred <- predict(fit, newdata = test, allow.new.levels = TRUE)
+  loo_results[i] <- test$xgd - pred
+}
 
-Downplay
+loo_rmse <- sqrt(mean(loo_results^2))
+loo_mae  <- mean(abs(loo_results))
 
-- U22 proxy (data limitation)
-- Positional shares
+
+model_eval_tbl <- tibble::tibble(
+  Model = c(
+    "Payroll-only benchmark",
+    "Fixed-effect team model",
+    "Final multilevel model (in-sample)",
+    "Final multilevel model (LOOCV)"
+  ),
+  RMSE = c(
+    sqrt(mean(residuals(panel_team_model)^2, na.rm = TRUE)),
+    sqrt(mean(residuals(team_efficiency_model)^2, na.rm = TRUE)),
+    sqrt(mean(residuals(team_efficiency_model_ml_ext2)^2, na.rm = TRUE)),
+    round(loo_rmse, 2)
+  ),
+  MAE = c(
+    mean(abs(residuals(panel_team_model)), na.rm = TRUE),
+    mean(abs(residuals(team_efficiency_model)), na.rm = TRUE),
+    mean(abs(residuals(team_efficiency_model_ml_ext2)), na.rm = TRUE),
+    round(loo_mae, 2)
+  )
+)
+
+knitr::kable(
+  model_eval_tbl,
+  digits = 2,
+  caption = "Model Comparison"
+)
+```
+
+In-sample error decreases across the three models, with the final multilevel model achieving the lowest RMSE and MAE. LOO-CV estimates for the final model (RMSE = 10.12, MAE = 8.01) are modestly higher than in-sample, which is expected given the small sample (about 29 team-seasons). The limited gap between in-sample and LOO-CV suggests the model is not badly overfit, though out-of-sample performance would need to be validated on additional seasons before drawing strong predictive conclusions.
 
 ### Key Takeaways
 
-- Player value is the strongest predictor of team performance.
-- Payroll is positive in the simple baseline model, but negative after controlling for predicted player value.
-- This supports an efficiency interpretation: teams perform better when they convert spending into production.
-- Salary concentration has a positive estimated effect, but the evidence is less strong than for player value and salary.
-- There is little evidence that U22 spending or positional allocation independently drives performance after accounting for value, salary, and team effects.
+The strongest result is that predicted player value is the best predictor of team performance. Once predicted player value is included, salary has a negative conditional effect. This supports an efficiency interpretation: teams perform better when they convert spending into actual production.
+
+There is also some evidence that salary concentration may help, but this result is less strong than the player value and salary findings. The U22 proxy and positional salary shares do not provide clear evidence of independent effects in the final model.
+
 
 ### Answer to Research Question
 
-Across all models, team performance in MLS is not driven by how much teams spend, but by how efficiently they convert salary into production.
+The results suggest that team performance in MLS is related to payroll, but not simply because spending more automatically produces better teams. At the team level, performance is explained more by predicted player value than by raw salary. Conditional on value, higher salary is associated with worse outcomes, suggesting that inefficient spending hurts roster construction.
 
-The baseline model shows that payroll alone has little explanatory power. The player-level analysis shows that salary translates to performance, but in a nonlinear and position-dependent way. At the team level, performance is explained by total player value, while excess spending without additional value is associated with worse outcomes.
+Salary concentration may help, but this result is less certain than the player value and salary findings. The GAM also suggests that salary does not translate into value in the same way across positions, which supports using predicted player value rather than raw payroll as the main roster-quality measure. However, the final multilevel model does not show clear independent effects for positional salary shares, so the main conclusion is about efficiency rather than simply shifting spending toward a specific position.
 
-These results are consistent across model specifications and robust to team-level heterogeneity. Overall, they suggest that efficient roster construction, rather than total spending, is the key determinant of success in MLS.
+Overall, efficient roster construction appears to matter more than total spending alone.
 
 ## Individual Analysis 2 Results (Nick)
 

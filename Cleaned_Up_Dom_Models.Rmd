@@ -128,6 +128,15 @@ player_season <- asa_player_gplus |>
     log_salary = log(base_salary + 1),
     position = factor(position),
     age = season_name - year(birth_date)
+  ) |>
+  filter(
+    !is.na(goals_added_above_replacement),
+    !is.na(log_salary),
+    !is.na(position),
+    position %in% c("D", "M", "F")
+  ) |>
+  mutate(
+    position = droplevels(factor(position))
   )
 ```
 
@@ -149,12 +158,18 @@ broom::tidy(fit_player_gam, conf.int = TRUE)
 ```{r, echo = FALSE}
 ### Aggregate predicted player value to team-season
 
-player_season <- player_season |>
+player_season_model <- player_season |>
+  filter(position %in% c("D", "M", "F")) |>
   mutate(
-    predicted_value = predict(fit_player_gam, newdata = player_season)
+    position = droplevels(factor(position))
   )
 
-team_efficiency <- player_season |>
+player_season_model <- player_season_model |>
+  mutate(
+    predicted_value = predict(fit_player_gam, newdata = player_season_model)
+  )
+
+team_efficiency <- player_season_model |>
   group_by(team_id, season_name) |>
   summarize(
     predicted_team_value = sum(predicted_value * minutes_played / 90, na.rm = TRUE),
@@ -291,7 +306,7 @@ saveRDS(team_efficiency_model_ml_ext2, "Models/team_efficiency_model_ml_ext2.rds
 saveRDS(panel_team_data, "Models/panel_team_data.rds")
 saveRDS(player_season, "Models/player_season.rds")
 saveRDS(team_efficiency_model_data, "Models/team_efficiency_model_data.rds")
-
+saveRDS(team_efficiency_model_data_ext, "Data/team_efficiency_model_data_ext.rds")
 saveRDS(mls_salaries_2025, "Data/mls_salaries_2025.rds")
 saveRDS(team_model_data, "Data/team_model_data.rds")
 saveRDS(position_salary, "Data/position_salary.rds")
