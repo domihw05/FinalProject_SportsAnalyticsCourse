@@ -340,3 +340,15 @@ In Methods/Results, frame the models as:
 - **Mechanism**
 - **Main team-level test**
 - **Robustness check**
+
+
+## EXTRA SHIT
+
+#### Team Efficiency Model
+
+$$
+xGD_{it} = \beta_0 + \beta_1 \widehat{V}_{it} + \beta_2 \text{Salary}_{it} + \beta_3 \text{Age}_{it}
++ \beta_4 \text{PctAtt}_{it} +\beta_5 \text{PctMid}_{it} + \gamma_t + \varepsilon_{it}
+$$
+
+This model separates total spending from how effectively that spending translates into player performance.

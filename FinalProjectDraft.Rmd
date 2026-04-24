@@ -49,10 +49,13 @@ position_salary <- readRDS(
 )
 
 # Optional final datasets if needed for extra plots
-#panel_team_data <- readRDS("Models/panel_team_data.rds")
-#player_season <- readRDS("Models/player_season.rds")
-#team_efficiency_model_data <- readRDS("Models/team_efficiency_model_data.rds")
-#team_efficiency_model_ml_ext2 <- readRDS("Models/team_efficiency_model_ml_ext2.rds")
+panel_team_data <- readRDS("Models/panel_team_data.rds")
+player_season <- readRDS("Models/player_season.rds")
+team_efficiency_model_data <- readRDS("Models/team_efficiency_model_data.rds")
+team_efficiency_model_ml_ext2 <- readRDS("Models/team_efficiency_model_ml_ext2.rds")
+panel_team_model <- readRDS("Models/panel_team_model.rds")
+team_efficiency_model <- readRDS("Models/team_efficiency_model.rds")
+fit_player_gam <- readRDS("Models/fit_player_gam.rds")
 ```
 
 # Abstract
@@ -226,8 +229,7 @@ ggplot(concentration_plot_data,
 
 Across all individual analyses, the goal is to evaluate how roster construction and salary allocation relate to team success. Each group member fits a distinct model, motivated by a different statistical perspective.
 
-## Individual Analysis 1: Team-level linear regression (Dominic Hoar-Weiler)
-
+## Individual Analysis 1: Team-season multilevel model (Dominic Hoar-Weiler)
 
 ### Question
 
@@ -235,7 +237,7 @@ Does team performance increase with total payroll, and does salary concentration
 
 ### Model specification
 
-We model team performance using expected goal differential (xGD) at the team-season level. We begin with a simple baseline model and progressively build toward richer specifications that incorporate player-level contributions and roster construction features.
+The final model is a team-season multilevel linear regression with a random intercept for team. The outcome is expected goal differential, and the main predictors are predicted roster value, total payroll, average age, salary concentration, U22 roster investment, and positional salary allocation. The random team intercept allows each MLS club to have its own baseline performance level, accounting for persistent team-level differences such as front-office quality, coaching, market effects, or organizational structure that are not directly observed in the dataset.
 
 #### Baseline Model
 
@@ -248,7 +250,7 @@ This model tests whether total payroll alone explains variation in team performa
 #### Player Level GAM
 
 $$
-GAAR_{ijt} = f(\log(\text{Salary}_{ijt})) + \delta_{\text{pos}(j)} + f_{\text{pos}(j)}(\log(\text{Salary}_{ijt})) + \varepsilon_{ijt}
+GAAR_{ijt} = f(\log(\text{Salary}_{ijt} + 1)) + \delta_{\text{pos}(j)} + f_{\text{pos}(j)}(\log(\text{Salary}_{ijt} + 1)) + \varepsilon_{ijt}
 $$
 
 We estimate a nonlinear relationship between salary and player value (goals added above replacement), allowing this relationship to vary by position.
@@ -256,60 +258,59 @@ We estimate a nonlinear relationship between salary and player value (goals adde
 #### Team Level Construction
 
 $$
-\widehat{V}{it} = \sum_{j \in i,t} \widehat{GAAR}_{ijt} \cdot \frac{\text{Minutes}_{ijt}}{90}
+\widehat{V}_{it} = \sum_{j \in i,t} \widehat{GAAR}_{ijt} \cdot \frac{\text{Minutes}_{ijt}}{90}
 $$
 
 We aggregate predicted player contributions to construct a team-level measure of roster value.
 
-#### Team Efficiency Model
-
-$$
-xGD_{it} = \beta_0 + \beta_1 \widehat{V}_{it} + \beta_2 \text{Salary}_{it} + \beta_3 \text{Age}_{it}
-+ \beta_4 \text{PctAtt}_{it} +\beta_5 \text{PctMid}_{it} + \gamma_t + \varepsilon_{it}
-$$
-
-This model separates total spending from how effectively that spending translates into player performance.
-
 #### Team Multilevel Model
 
+$$
+xGD_{it} \sim \mathcal{N}(\mu_{it},\sigma^2)
+$$
+
 \begin{align*}
-xGD_{it} &= \beta_0 + \beta_1 \,\text{Value}_{it} + \beta_2 \,\text{Salary}_{it} + \beta_3 \,\text{Age}_{it} \\
-&\quad + \beta_4 \,\text{Top3Share}_{it} + \beta_5 \,\text{U22}_{it} \\
+\mu_{it} &= \beta_0 + \beta_1 \,\widehat{V}_{it} + \beta_2 \,\text{Salary}_{it} + \beta_3 \,\text{Age}_{it} \\
+&\quad + \beta_4 \,\text{Top3Share}_{it} + \beta_5 \,\text{U22ProxyCount}_{it} \\
 &\quad + \beta_6 \,\text{ForwardShare}_{it} + \beta_7 \,\text{MidfieldShare}_{it} \\
-&\quad + u_i + \epsilon_{it}
+&\quad + u_i
 \end{align*}
 
-We include team-level random effects to account for unobserved differences across teams that persist over time.
+$$u_i \sim \mathcal{N}(0,\sigma_{\text{team}}^2)$$
+
+We include team-level random effects to account for unobserved differences across teams that persist over time. Predicted roster value, salary, and average age are standardized before fitting the multilevel model, so their coefficients represent changes in expected goal differential for a one-standard-deviation increase in each predictor.
 
 ### Assumptions
 
 Across models, we assume:
 
 - Linearity in parameters for the regression components
+- Residual variation is normally distributed around the fitted mean
 - Errors satisfy $\varepsilon_{it} \sim \mathcal{N}(0, \sigma^2)$
-- Independence across team-seasons (conditional on covariates and fixed/random effects)
+- Conditional on the included covariates and team random effects, residual errors are independent across team-seasons.
 - Constant variance of errors
-- Limited omitted variable bias after including key roster and season controls
+- The included roster construction variables capture the main observed differences relevant to the project question, while remaining unobserved team differences are partially absorbed by the team random intercept
 
 For the multilevel model, we additionally assume:
 
+- $xGD_{it} \sim \mathcal{N}(\mu_{it},\sigma^2)$
 - Random effects follow $u_i \sim \mathcal{N}(0, \tau^2)$ and are independent of $\varepsilon_{it}$
 
 ### Why this model is appropriate
 
-This modeling approach directly matches the project question by separating two effects: how much teams spend and how efficiently they convert that spending into performance. The baseline model provides a simple benchmark, while the extended models incorporate roster construction features and player-level estimates. The GAM allows for flexibility in the salary-performance relationship at the player level, which avoids imposing a strict linear assumption. The multilevel model accounts for persistent team-level differences that are not captured by observed variables.
+This modeling approach directly matches the project question by separating two effects: how much teams spend and how efficiently they convert that spending into performance. The baseline model provides a simple benchmark, while the player-level GAM and final multilevel model incorporate roster construction features and player-level estimates. The GAM allows for flexibility in the salary-performance relationship at the player level, which avoids imposing a strict linear assumption. The multilevel model accounts for persistent team-level differences that are not captured by observed variables.
 
-### Model evaluation plan
+### Model Evaluation Plan
 
 We evaluate model performance using RMSE and MAE to measure predictive accuracy. We also compare models across different specifications to assess whether adding roster construction variables improves explanatory power. Residual diagnostics are used to check for violations of model assumptions, including nonlinearity and heteroskedasticity. This comparison framework allows us to determine whether more complex models provide meaningful improvements over simpler baselines.
 
-### Uncertainty plan
+### Uncertainty Plan
 
-We quantify uncertainty using 95% confidence intervals for all estimated coefficients. These intervals provide a measure of statistical significance and effect size. For robustness, we also consider bootstrap confidence intervals, which are less sensitive to model assumptions and provide a nonparametric check on inference. In the multilevel model, uncertainty in both fixed and random effects is accounted for through the estimated variance components.
+We quantify uncertainty using 95% confidence intervals for all estimated coefficients. These intervals quantify uncertainty around the estimated effects and help assess whether the data provide clear evidence of positive, negative, or near-zero relationships. For robustness, we also consider bootstrap confidence intervals, which are less sensitive to model assumptions and provide a nonparametric check on inference. In the multilevel model, uncertainty in both fixed and random effects is accounted for through the estimated variance components.
 	
-### SIDE NOTES DOM
+### Other Modeling Notes
 
-When pooling all seasons without controlling for year effects, salary variables are not statistically significant. After introducing season fixed effects, total payroll becomes significant. This suggests that league-wide changes, such as salary cap growth and evolving roster rules, confound the relationship between spending and performance if not properly controlled for.
+In preliminary team-level models, pooling all seasons without controlling for year effects made salary variables difficult to interpret. After introducing season fixed effects in the baseline model, total payroll became more informative. This suggests that league-wide changes, such as salary cap growth and evolving roster rules, can confound the relationship between spending and performance if not properly controlled for.
 
 \newpage
 
@@ -412,11 +413,11 @@ knitr::kable(
   caption = "Baseline Team Model"
 )
 
-knitr::kable(
-  main_tbl,
-  digits = 3,
-  caption = "Main Team Efficiency Model"
-)
+#knitr::kable(
+#  main_tbl,
+#  digits = 3,
+#  caption = "Main Team Efficiency Model"
+#)
 
 
 # -------------------------
@@ -482,29 +483,23 @@ knitr::kable(
 
 #### Baseline Model
 
-The baseline model explains very little variation in team performance ($R^2 \approx 0.02$), and neither total payroll nor salary concentration is statistically significant. Confidence intervals for both coefficients are wide and include zero.
+The baseline model shows that payroll has a positive relationship with team performance after controlling for season effects. The coefficient on log salary is positive and statistically significant, which suggests that higher-spending teams tend to have better expected goal differential in the simplest model.
 
-This suggests that aggregate spending alone is not a meaningful predictor of team success.
+However, this result is limited because the baseline model only measures how much a team spends. It does not tell us whether that spending is efficient, or whether the team is actually getting strong player production from its payroll.
 
 #### Player Level GAM
 
-At the player level, salary is clearly related to performance, but the relationship is nonlinear and varies by position. Higher salaries generally correspond to higher value, but with diminishing returns and different patterns across positions.
+At the player level, salary is clearly related to performance, but the relationship is nonlinear and varies by position. Higher salaries generally correspond to higher goals added above replacement, but the returns are not constant across the salary distribution.
 
-This indicates that spending does matter, but its effectiveness depends on how it is allocated across players.
-
-#### Team Model LM
-
-Once player contributions are aggregated to the team level, results change substantially. Predicted player value is strongly positive and statistically significant, while total salary becomes negative and significant when holding value constant.
-
-This is the central result: teams that generate more value perform better, but conditional on value, higher spending is associated with worse outcomes. In other words, inefficient spending reduces performance.
-
-These results are stable after adding controls such as team age and roster composition.
+This matters because it suggests that spending can help, but only when salary is converted into actual player value. The same payroll amount can lead to different outcomes depending on which players and positions receive that money.
 
 #### Multilevel Team Model
 
-The multilevel model accounts for persistent differences across teams. The main findings remain unchanged: player value is strongly positive, and salary retains a negative conditional effect. Random effects indicate meaningful variation across teams, but do not alter the core relationships.
+The multilevel model accounts for persistent differences across teams through a team random intercept. The main result is that predicted player value is strongly positive, while salary has a negative conditional effect after controlling for that value.
 
-Among additional variables, age shows a negative effect, while positional spending and U22 share are not consistently significant.
+This is the key efficiency finding. Spending more is not necessarily bad, but spending more without producing additional player value is associated with worse performance. In other words, teams appear to benefit from efficient roster construction rather than payroll size alone.
+
+Salary concentration also has a positive estimated effect. This suggests that top-heavy spending can help, although this result is less certain than the player value and salary effects. Average age is negative but should be treated as exploratory, while the U22 proxy and positional salary shares do not show clear independent effects.
 
 Then interpretation:
 	•	$\beta_1 > 0$: higher player value improves performance
@@ -529,10 +524,11 @@ Downplay
 
 ### Key Takeaways
 
-- Player value is the strongest predictor of team performance
-- Conditional on value, higher salary is associated with worse outcomes
-- Evidence for salary concentration is positive but less consistent
-- Little evidence that positional allocation or U22 spending independently drives results
+- Player value is the strongest predictor of team performance.
+- Payroll is positive in the simple baseline model, but negative after controlling for predicted player value.
+- This supports an efficiency interpretation: teams perform better when they convert spending into production.
+- Salary concentration has a positive estimated effect, but the evidence is less strong than for player value and salary.
+- There is little evidence that U22 spending or positional allocation independently drives performance after accounting for value, salary, and team effects.
 
 ### Answer to Research Question
 
