@@ -88,15 +88,15 @@ We use publicly available MLS salary and performance data to evaluate multiple s
 
 Our results show that higher payroll alone does not explain team success. Instead, the key factor is how efficiently teams convert salary into player performance. Teams that get more value out of their spending tend to perform better than teams that simply spend more.
 
-## 3 Data
+# Data
 
 We combine MLS salary data with team- and player-level performance data to study how roster construction relates to team success.
 
-### 3.1 Data Sources
+## Data Sources
 
 Salary data come from the MLS Players Association Salary Guide, which reports each player’s club, position, base salary, and guaranteed compensation. Performance data come from American Soccer Analysis (ASA) through the `itscalledsoccer` R package, including team expected goals, team goals added, and player goals added above replacement.
 
-### 3.2 Unit of Analysis
+## Unit of Analysis
 
 We use two units of analysis:
 
@@ -105,13 +105,13 @@ We use two units of analysis:
 
 Player-level predictions are later aggregated to the team-season level.
 
-### 3.3 Outcome Variables
+## Outcome Variables
 
 The main team-level outcome is **expected goal differential (xGD)**, defined as expected goals for minus expected goals against. We use xGD because it captures underlying team quality better than raw wins or points.
 
 At the player level, the main outcome is **goals added above replacement (GAAR)**, which measures player contribution relative to replacement level.
 
-### 3.4 Predictor Variables
+## Predictor Variables
 
 We construct several roster-construction variables:
 
@@ -122,7 +122,7 @@ We construct several roster-construction variables:
 - **U22 proxy count:** count of young players used as a proxy for U22 roster investment.
 - **Predicted roster value:** team-level value measure created by aggregating player-level predicted contributions.
 
-### 3.5 Data Cleaning and Feature Engineering
+## Data Cleaning and Feature Engineering
 
 We standardize team and player names across sources, merge salary and performance data, and remove observations with missing key salary or performance variables. We then aggregate player-level records to the team-season level.
 
@@ -132,7 +132,7 @@ For each team-season, we calculate total payroll, top 3 salary share, positional
 
 ## Salary distribution
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, fig.width = 6, fig.height = 2.7, fig.align = "center"}
 ggplot(player_salaries_panel, aes(x = base_salary)) +
   geom_histogram(bins = 50) +
   scale_x_continuous(labels = scales::dollar) +
@@ -153,7 +153,7 @@ Salaries are highly right-skewed, meaning a small number of players earn disprop
 
 ## Team Payroll vs Team Performance
 
-```{r, echo = FALSE, message = FALSE}
+```{r, echo = FALSE, message = FALSE, fig.width = 6, fig.height = 2.7, fig.align = "center"}
 plot_data <- team_efficiency_model_data_ext
 
 ggplot(plot_data, aes(x = log_salary, y = xgd)) +
@@ -172,7 +172,7 @@ We see a moderate positive relationship. Payroll alone does not fully explain pe
 
 ## Salary concentration vs team performance
 
-```{r, echo = FALSE, message = FALSE}
+```{r, echo = FALSE, message = FALSE, fig.width = 6, fig.height = 2.7, fig.align = "center"}
 concentration_plot_data <- team_efficiency_model_data_ext
 
 ggplot(concentration_plot_data, aes(x = top3_share, y = xgd)) +
@@ -191,9 +191,7 @@ Once again, we see a slight positive relationship, indicating that top-heavy spe
 
 ## Positional Allocation Patterns
 
-```{r, echo = FALSE}
-
-
+```{r, echo = FALSE, fig.width = 6, fig.height = 2.7, fig.align = "center"}
 ggplot(position_salary, aes(x = factor(team_id), y = pos_share, fill = position)) +
   geom_col() +
   labs(
@@ -204,7 +202,7 @@ ggplot(position_salary, aes(x = factor(team_id), y = pos_share, fill = position)
   theme(axis.text.x = element_blank())
 ```
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, fig.width = 6, fig.height = 2.7, fig.align = "center"}
 ggplot(concentration_plot_data,
        aes(x = log_salary,
            y = xgd,
@@ -232,77 +230,51 @@ The final model is a team-season multilevel linear regression with a random inte
 
 #### Baseline Model
 
-$$
-xGD_{it} = \beta_0 + \beta_1 \log(\text{Salary}_{it}) + \gamma_t + \varepsilon_{it}
-$$
-
-This model tests whether total payroll alone explains variation in team performance, controlling for season-level effects.
+I compare the final model to simpler payroll-only and fixed-effect benchmarks to evaluate whether the added roster-value variables improve fit: $xGD_{it} = \beta_0 + \beta_1 \log(\text{Salary}_{it}) + \gamma_t + \varepsilon_{it}$
 
 #### Player Level GAM
 
-$$
-GAAR_{ijt} = f(\log(\text{Salary}_{ijt} + 1)) + \delta_{\text{pos}(j)} + f_{\text{pos}(j)}(\log(\text{Salary}_{ijt} + 1)) + \varepsilon_{ijt}
-$$
+\begin{align*}
+  GAAR_{ijt} &= f(\log(\text{Salary}_{ijt} + 1)) + \delta_{\text{pos}(j)} + f_{\text{pos}(j)}(\log(\text{Salary}_{ijt} + 1)) + \varepsilon_{ijt}\\
+  \widehat{V}_{it} &= \sum_{j \in i,t} \widehat{GAAR}_{ijt} \cdot \frac{\text{Minutes}_{ijt}}{90}
+\end{align*}
 
-We estimate a nonlinear relationship between salary and player value (goals added above replacement), allowing this relationship to vary by position.
-
-#### Team Level Construction
-
-$$
-\widehat{V}_{it} = \sum_{j \in i,t} \widehat{GAAR}_{ijt} \cdot \frac{\text{Minutes}_{ijt}}{90}
-$$
-
-We aggregate predicted player contributions to construct a team-level measure of roster value.
+To estimate roster value, I first fit a player-level GAM predicting goals added above replacement (GAAR) from log salary, position, and position-specific salary smooths. I then aggregate each player’s predicted GAAR, scaled by minutes played, to the team-season level. This creates a predicted roster value variable that measures estimated production rather than raw spending.
 
 #### Team Multilevel Model
 
-$$
-xGD_{it} \sim \mathcal{N}(\mu_{it},\sigma^2)
-$$
+The main model is a team-season multilevel regression with expected goal differential as the outcome and a random intercept for team:
 
-\begin{align*}
-\mu_{it} &= \beta_0 + \beta_1 \,\widehat{V}_{it} + \beta_2 \,\text{Salary}_{it} + \beta_3 \,\text{Age}_{it} \\
-&\quad + \beta_4 \,\text{Top3Share}_{it} + \beta_5 \,\text{U22ProxyCount}_{it} \\
-&\quad + \beta_6 \,\text{ForwardShare}_{it} + \beta_7 \,\text{MidfieldShare}_{it} \\
-&\quad + u_i
-\end{align*}
+\[
+xGD_{it} \sim N(\mu_{it}, \sigma^2)
+\]
 
-$$u_i \sim \mathcal{N}(0,\sigma_{\text{team}}^2)$$
+\[
+\mu_{it} = \beta_0 + \beta_1\widehat{V}_{it} + \beta_2Salary_{it} + \beta_3Age_{it}
++ \beta_4Top3Share_{it} + \beta_5U22_{it}
++ \beta_6ForwardShare_{it} + \beta_7MidfieldShare_{it} + u_i
+\]
 
-We include team-level random effects to account for unobserved differences across teams that persist over time. Predicted roster value, salary, and average age are standardized before fitting the multilevel model, so their coefficients represent changes in expected goal differential for a one-standard-deviation increase in each predictor.
+\[
+u_i \sim N(0,\sigma^2_{team})
+\]
+
+Predicted roster value, salary, and age are standardized, so those coefficients represent the change in xGD for a one-standard-deviation increase.
 
 ### Assumptions
 
-Across models, we assume:
+I assume linear relationships in the team-level regression components, normally distributed residuals with constant variance, conditional independence across team-seasons after accounting for covariates and team random effects, and normally distributed team random intercepts independent of the residual error.
 
-- Linearity in parameters for the regression components
-- Residual variation is normally distributed around the fitted mean
-- Errors satisfy $\varepsilon_{it} \sim \mathcal{N}(0, \sigma^2)$
-- Conditional on the included covariates and team random effects, residual errors are independent across team-seasons.
-- Constant variance of errors
-- The included roster construction variables capture the main observed differences relevant to the project question, while remaining unobserved team differences are partially absorbed by the team random intercept
 
-For the multilevel model, we additionally assume:
-
+- $\varepsilon_{it} \sim \mathcal{N}(0, \sigma^2)$
 - $xGD_{it} \sim \mathcal{N}(\mu_{it},\sigma^2)$
 - Random effects follow $u_i \sim \mathcal{N}(0, \tau^2)$ and are independent of $\varepsilon_{it}$
 
-### Why this model is appropriate
+### Justification, Evaluation, and Uncertainty
 
-This modeling approach directly matches the project question by separating two effects: how much teams spend and how efficiently they convert that spending into performance. The baseline model provides a simple benchmark, while the player-level GAM and final multilevel model incorporate roster construction features and player-level estimates. The GAM allows for flexibility in the salary-performance relationship at the player level, which avoids imposing a strict linear assumption. The multilevel model accounts for persistent team-level differences that are not captured by observed variables.
+This model matches the project question because it separates raw spending from estimated player value while accounting for persistent team differences. The player-level GAM avoids forcing a linear salary-value relationship, and the random team intercept captures stable differences across clubs such as coaching, front-office quality, and market effects.
 
-### Model Evaluation Plan
-
-I evaluate the model progression using in-sample RMSE and MAE as descriptive measures of predictive error. I compare simpler payroll-only and fixed-effect team models against the final multilevel model to assess whether adding player-value and roster-construction variables improves fit. I also use residual diagnostics to check for obvious violations of model assumptions, including nonlinearity and heteroskedasticity.
-
-### Uncertainty Plan
-
-I quantify uncertainty using 95% confidence intervals for the estimated coefficients. These intervals show how much uncertainty remains around each estimated effect and help assess whether the data provide clear evidence of positive, negative, or near-zero relationships. In the multilevel model, uncertainty in team-level heterogeneity is summarized through the estimated random-effect variance component.
-	
-### Other Modeling Notes
-
-In preliminary team-level models, pooling all seasons without controlling for year effects made salary variables difficult to interpret. After introducing season fixed effects in the baseline model, total payroll became more informative. This suggests that league-wide changes, such as salary cap growth and evolving roster rules, can confound the relationship between spending and performance if not properly controlled for.
-
+I evaluate the model using RMSE and MAE, comparing it to simpler payroll-only and fixed-effect benchmarks. I quantify uncertainty with 95% confidence intervals for fixed effects and the estimated random-effect variance for team heterogeneity. Because predicted roster value comes from a first-stage GAM, team-level intervals should be interpreted as conditional on that estimated value measure.
 
 ## Individual Analysis 2: Roster Architecture (Nick Kourakis)
 
@@ -603,13 +575,6 @@ knitr::kable(
 
 In-sample error decreases across the three models, with the final multilevel model achieving the lowest RMSE and MAE. LOO-CV estimates for the final model (RMSE = 10.12, MAE = 8.01) are modestly higher than in-sample, which is expected given the small sample (about 29 team-seasons). The limited gap between in-sample and LOO-CV suggests the model is not badly overfit, though out-of-sample performance would need to be validated on additional seasons before drawing strong predictive conclusions.
 
-### Key Takeaways
-
-The strongest result is that predicted player value is the best predictor of team performance. Once predicted player value is included, salary has a negative conditional effect. This supports an efficiency interpretation: teams perform better when they convert spending into actual production.
-
-There is also some evidence that salary concentration may help, but this result is less strong than the player value and salary findings. The U22 proxy and positional salary shares do not provide clear evidence of independent effects in the final model.
-
-
 ### Answer to Research Question
 
 The results suggest that team performance in MLS is related to payroll, but not simply because spending more automatically produces better teams. At the team level, performance is explained more by predicted player value than by raw salary. Conditional on value, higher salary is associated with worse outcomes, suggesting that inefficient spending hurts roster construction.
@@ -854,9 +819,9 @@ ggplot(cluster_centers_long, aes(Position, Share, group = cluster, color = clust
 ```
 
 
-## 7 Discussion
+# Discussion
 
-### 7.1 Conclusion
+## Conclusion
 
 This project looked at how MLS teams build rosters under salary and roster constraints, focusing on total spending, salary concentration, positional allocation, roster depth, and age. Overall, the results suggest that team performance is not explained by one roster-building strategy alone. Instead, successful teams seem to benefit from combining high-impact spending at the top of the roster with enough productive depth across the rest of the team.
 
@@ -866,7 +831,7 @@ We also found evidence that where teams spend matters. Dom’s model and Flynn�
 
 Finally, Dom’s and Nick’s models both found some evidence that younger teams are associated with better performance. This could reflect the value of younger, high-energy players, better roster flexibility, or the ability to get strong production from players before they become more expensive. Overall, our findings suggest that successful MLS roster construction depends on balancing star power, attacking investment, younger contributors, and enough middle-class depth to avoid relying only on a few expensive players.
 
-### 7.2 What We Learned
+## What We Learned
 
 The main thing we learned is that MLS roster construction is multidimensional. In a salary-cap league, it is not surprising that payroll alone does not explain everything. The more interesting result is that several specific roster-building choices appear to matter.
 
@@ -874,7 +839,7 @@ First, top-end spending seems useful. Teams with more salary concentrated among 
 
 These findings point toward a more specific interpretation than simply “spend efficiently.” Strong MLS teams may be the ones that use their constrained budgets to build around high-impact players, especially attackers, while still maintaining enough depth and youth to support those players over a full season.
 
-### 7.3 Limitations
+## Limitations
 
 There are several limitations to our analysis. First, some roster-rule variables are proxies rather than official MLS labels. For example, U22 investment, TAM-style depth, and star-player concentration are approximated using available salary, age, and roster data, so they may not perfectly match official MLS roster designations.
 
@@ -886,7 +851,7 @@ Fourth, Dom’s predicted roster value measure comes from a first-stage player-l
 
 Finally, roster construction changes throughout a season. Our team-season data does not fully capture injuries, transfers, player availability, tactical fit, or when specific players actually contributed. This matters because a team’s salary structure at one point in time may not fully represent the roster that drove performance across the season.
 
-### 7.4 Future Work
+## Future Work
 
 Future work could improve this project by using official MLS roster designations for Designated Players, U22 players, TAM players, and other roster mechanisms instead of relying on proxies. This would make the roster construction variables more accurate and would allow for a cleaner test of how specific MLS rules affect team-building strategy.
 
@@ -896,7 +861,7 @@ More detailed information on injuries, transfers, minutes played, and player ava
 
 Another useful extension would be to compare regular-season performance with playoff performance. MLS teams may build rosters differently depending on whether they are trying to maximize full-season consistency or peak performance in knockout games.
 
-### 7.5 Final Takeaway
+## Final Takeaway
 
 Overall, our results suggest that successful MLS roster construction is not just about spending more or spreading money evenly. The stronger pattern is that teams may benefit from investing in high-impact players, especially forwards, while also maintaining younger contributors and a strong middle class of productive players. In a constrained league like MLS, the best roster construction strategy appears to involve balancing star power, depth, age, and positional investment rather than relying on one simple spending formula.
 
