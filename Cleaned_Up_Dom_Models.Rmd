@@ -310,6 +310,7 @@ saveRDS(team_efficiency_model_data_ext, "Data/team_efficiency_model_data_ext.rds
 saveRDS(mls_salaries_2025, "Data/mls_salaries_2025.rds")
 saveRDS(team_model_data, "Data/team_model_data.rds")
 saveRDS(position_salary, "Data/position_salary.rds")
+saveRDS(player_salaries_panel, "Data/player_salaries_panel.rds")
 ```
 
 ---
