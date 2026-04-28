@@ -1,0 +1,1340 @@
+---
+title: "MLS Salary, Roster Construction, and Team Performance"
+author:
+- "Dominic Hoar-Weiler (dhoarwei)"
+- Brendan Flynn (bflynn)
+- Nick Kourakis (nkouraki)
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: false
+    df_print: paged
+  pdf_document:
+    number_sections: true
+    toc: false
+fontsize: 11pt
+geometry: margin=1in
+---
+
+```{r, include = FALSE}
+library(tidyverse)
+library(mgcv)
+library(lme4)
+library(lmerTest)
+library(broom)
+library(broom.mixed)
+library(lubridate)
+
+# EDA objects
+mls_salaries_2025 <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/mls_salaries_2025.rds"))
+)
+
+team_model_data <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/team_model_data.rds"))
+)
+
+position_salary <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/position_salary.rds"))
+)
+
+# Model objects
+mls_salaries_2025 <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/mls_salaries_2025.rds"))
+)
+
+team_model_data <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/team_model_data.rds"))
+)
+
+position_salary <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/position_salary.rds"))
+)
+
+# Optional final datasets if needed for extra plots
+#panel_team_data <- readRDS("Models/panel_team_data.rds")
+#player_season <- readRDS("Models/player_season.rds")
+#team_efficiency_model_data <- readRDS("Models/team_efficiency_model_data.rds")
+#team_efficiency_model_ml_ext2 <- readRDS("Models/team_efficiency_model_ml_ext2.rds")
+#panel_team_model <- readRDS("Models/panel_team_model.rds")
+#team_efficiency_model <- readRDS("Models/team_efficiency_model.rds")
+#fit_player_gam <- readRDS("Models/fit_player_gam.rds")
+#team_efficiency_model_data_ext <- readRDS("Data/team_efficiency_model_data_ext.rds")
+#player_salaries_panel <- readRDS("Data/player_salaries_panel.rds")
+```
+
+# Abstract
+
+Major League Soccer runs under strict salary and roster rules, but teams still vary a lot in how well they perform. This project looks at how teams spend their money and whether different roster construction strategies actually lead to better results. Using publicly available MLS salary and performance data, we study how total payroll, salary distribution, and positional spending relate to outcomes like expected goal differential and points per game. We compare several statistical models that each capture a different view of roster construction. Across these approaches, we find that spending more does not guarantee success. Instead, teams that get more performance out of their salary tend to perform better. This suggests that efficiency, not just spending, is the main driver of success in MLS.
+
+# Introduction
+
+Major League Soccer is designed to promote parity. Teams operate under a salary cap and a set of roster rules that limit how much they can spend and how they can build their teams. Even with these constraints, there is still a large gap in performance across teams. Some teams consistently compete at the top of the table, while others struggle. This raises a simple but important question about how teams are using their limited resources. 
+
+## Problem Statement
+
+MLS teams all face similar financial constraints, but they make very different decisions about how to allocate salary across players and positions. There is no clear empirical answer for which of these strategies actually leads to better performance. Some teams concentrate spending on a few high-paid players, while others spread salary more evenly across the roster.
+
+## Why This Matters
+
+In a capped league, every dollar matters. Poor allocation decisions can limit a team’s ability to compete, while efficient spending can create an advantage even without a higher budget. From a sports analytics perspective, this is a broader question about how to allocate limited resources in a way that maximizes output. Understanding this relationship can help explain why some teams outperform others despite similar constraints.
+
+## Research Question
+
+How does salary allocation and roster construction relate to team performance in MLS?
+
+More specifically, we study whether team payroll, salary concentration, and positional spending patterns are associated with outcomes such as expected goal differential, goals added, or points per game.
+
+We use publicly available MLS salary and performance data to evaluate multiple statistical models. Each individual model addresses the same project question from a different angle, allowing us to compare which modeling framework is most informative for understanding roster construction strategy.
+
+## Preview of Results
+
+Our results show that higher payroll alone does not explain team success. Instead, the key factor is how efficiently teams convert salary into player performance. Teams that get more value out of their spending tend to perform better than teams that simply spend more.
+
+# Data
+
+We combine MLS salary data with team- and player-level performance data to study how roster construction relates to team success.
+
+## Data Sources
+
+Salary data come from the MLS Players Association Salary Guide, which reports each player’s club, position, base salary, and guaranteed compensation. Performance data come from American Soccer Analysis (ASA) through the `itscalledsoccer` R package, including team expected goals, team goals added, and player goals added above replacement.
+
+## Unit of Analysis
+
+We use two units of analysis:
+
+- **Player-season:** used to model the relationship between salary, position, and player value.
+- **Team-season:** used to study how payroll, salary concentration, positional spending, and predicted roster value relate to team performance.
+
+Player-level predictions are later aggregated to the team-season level.
+
+## Outcome Variables
+
+The main team-level outcome is **expected goal differential (xGD)**, defined as expected goals for minus expected goals against. We use xGD because it captures underlying team quality better than raw wins or points.
+
+At the player level, the main outcome is **goals added above replacement (GAAR)**, which measures player contribution relative to replacement level.
+
+## Predictor Variables
+
+We construct several roster-construction variables:
+
+- **Total payroll / log payroll:** total team salary, with log payroll used because salaries are highly skewed.
+- **Top 3 salary share:** share of payroll spent on the three highest-paid players.
+- **Positional salary shares:** share of payroll spent on forwards, midfielders, defenders, and goalkeepers.
+- **Average age:** average roster age when available.
+- **U22 proxy count:** count of young players used as a proxy for U22 roster investment.
+- **Predicted roster value:** team-level value measure created by aggregating player-level predicted contributions.
+
+## Data Cleaning and Feature Engineering
+
+We standardize team and player names across sources, merge salary and performance data, and remove observations with missing key salary or performance variables. We then aggregate player-level records to the team-season level.
+
+For each team-season, we calculate total payroll, top 3 salary share, positional spending shares, average age, U22 proxy count, and predicted roster value. Predicted roster value is created by fitting a player-level GAM for salary, position, and GAAR, then summing predicted player contributions within each team-season.
+
+# Exploratory Data Analysis (EDA)
+
+## Salary distribution
+
+```{r, echo = FALSE, fig.width = 6, fig.height = 2.7, fig.align = "center"}
+ggplot(player_salaries_panel, aes(x = base_salary)) +
+  geom_histogram(bins = 50) +
+  scale_x_continuous(labels = scales::dollar) +
+  labs(title = "MLS Salary Distribution (2013-25)",
+       x = "Base Salary",
+       y = "Count")
+
+ggplot(player_salaries_panel, aes(x = log(base_salary + 1))) +
+  geom_histogram(bins = 50) +
+  labs(title = "Log Salary Distribution (2013-25)",
+       x = "Log(Base Salary)",
+       y = "Count")
+```
+
+## Takeaway
+
+Salaries are highly right-skewed, meaning a small number of players earn disproportionately high salaries and suggesting a star-driven league structure, giving us reason to use a log-transformation.
+
+## Team Payroll vs Team Performance
+
+```{r, echo = FALSE, message = FALSE, fig.width = 6, fig.height = 2.7, fig.align = "center"}
+plot_data <- team_efficiency_model_data_ext
+
+ggplot(plot_data, aes(x = log_salary, y = xgd)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Team Performance vs Payroll (2013-25)",
+    x = "Log Total Salary",
+    y = "Expected Goal Differential"
+  )
+```
+
+### Takeaway
+
+We see a moderate positive relationship. Payroll alone does not fully explain performance, which motivates our decision to add roster structure variables.
+
+## Salary concentration vs team performance
+
+```{r, echo = FALSE, message = FALSE, fig.width = 6, fig.height = 2.7, fig.align = "center"}
+concentration_plot_data <- team_efficiency_model_data_ext
+
+ggplot(concentration_plot_data, aes(x = top3_share, y = xgd)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Salary Concentration vs Team Performance",
+    x = "Top 3 Salary Share",
+    y = "Expected Goals Differential"
+  )
+```
+
+### Takeaway
+
+Once again, we see a slight positive relationship, indicating that top-heavy spending could be correlated with team performance.
+
+## Positional Allocation Patterns
+
+```{r, echo = FALSE, fig.width = 6, fig.height = 2.7, fig.align = "center"}
+ggplot(position_salary, aes(x = factor(team_id), y = pos_share, fill = position)) +
+  geom_col() +
+  labs(
+    title = "Salary Allocation by Position (2025)",
+    x = "Team",
+    y = "Share of Payroll"
+  ) +
+  theme(axis.text.x = element_blank())
+```
+
+```{r, echo = FALSE, fig.width = 6, fig.height = 2.7, fig.align = "center"}
+ggplot(concentration_plot_data,
+       aes(x = log_salary,
+           y = xgd,
+           size = top3_share)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "Payroll, Concentration, and Performance (2013-25)",
+       x = "Log Payroll",
+       y = "Expected Goals Differential",
+       size = "Top 3 Share")
+```
+
+# Methods
+
+Across all individual analyses, the goal is to evaluate how roster construction and salary allocation relate to team success. Each group member fits a distinct model, motivated by a different statistical perspective.
+
+## Individual Analysis 1: Team-season multilevel model (Dominic Hoar-Weiler)
+
+### Question
+
+Does team performance increase with total payroll, and does salary concentration help or hurt after controlling for total spending?
+
+### Model specification
+
+The final model is a team-season multilevel linear regression with a random intercept for team. The outcome is expected goal differential, and the main predictors are predicted roster value, total payroll, average age, salary concentration, U22 roster investment, and positional salary allocation. The random team intercept allows each MLS club to have its own baseline performance level, accounting for persistent team-level differences such as front-office quality, coaching, market effects, or organizational structure that are not directly observed in the dataset.
+
+#### Baseline Model
+
+I compare the final model to simpler payroll-only and fixed-effect benchmarks to evaluate whether the added roster-value variables improve fit: $xGD_{it} = \beta_0 + \beta_1 \log(\text{Salary}_{it}) + \gamma_t + \varepsilon_{it}$
+
+#### Player Level GAM
+
+\begin{align*}
+  GAAR_{ijt} &= f(\log(\text{Salary}_{ijt} + 1)) + \delta_{\text{pos}(j)} + f_{\text{pos}(j)}(\log(\text{Salary}_{ijt} + 1)) + \varepsilon_{ijt}\\
+  \widehat{V}_{it} &= \sum_{j \in i,t} \widehat{GAAR}_{ijt} \cdot \frac{\text{Minutes}_{ijt}}{90}
+\end{align*}
+
+To estimate roster value, I first fit a player-level GAM predicting goals added above replacement (GAAR) from log salary, position, and position-specific salary smooths. I then aggregate each player’s predicted GAAR, scaled by minutes played, to the team-season level. This creates a predicted roster value variable that measures estimated production rather than raw spending.
+
+#### Team Multilevel Model
+
+The main model is a team-season multilevel regression with expected goal differential as the outcome and a random intercept for team:
+
+\[
+xGD_{it} \sim N(\mu_{it}, \sigma^2)
+\]
+
+\[
+\mu_{it} = \beta_0 + \beta_1\widehat{V}_{it} + \beta_2Salary_{it} + \beta_3Age_{it}
++ \beta_4Top3Share_{it} + \beta_5U22_{it}
++ \beta_6ForwardShare_{it} + \beta_7MidfieldShare_{it} + u_i
+\]
+
+\[
+u_i \sim N(0,\sigma^2_{team})
+\]
+
+Predicted roster value, salary, and age are standardized, so those coefficients represent the change in xGD for a one-standard-deviation increase.
+
+### Assumptions
+
+I assume linear relationships in the team-level regression components, normally distributed residuals with constant variance, conditional independence across team-seasons after accounting for covariates and team random effects, and normally distributed team random intercepts independent of the residual error.
+
+
+- $\varepsilon_{it} \sim \mathcal{N}(0, \sigma^2)$
+- $xGD_{it} \sim \mathcal{N}(\mu_{it},\sigma^2)$
+- Random effects follow $u_i \sim \mathcal{N}(0, \tau^2)$ and are independent of $\varepsilon_{it}$
+
+### Justification, Evaluation, and Uncertainty
+
+This model matches the project question because it separates raw spending from estimated player value while accounting for persistent team differences. The player-level GAM avoids forcing a linear salary-value relationship, and the random team intercept captures stable differences across clubs such as coaching, front-office quality, and market effects.
+
+I evaluate the model using RMSE and MAE, comparing it to simpler payroll-only and fixed-effect benchmarks. I quantify uncertainty with 95% confidence intervals for fixed effects and the estimated random-effect variance for team heterogeneity. Because predicted roster value comes from a first-stage GAM, team-level intervals should be interpreted as conditional on that estimated value measure.
+
+## Individual Analysis 2: Roster Architecture (Nick Kourakis)
+
+### Question
+
+Does team performance depend more on the salary disparity between highest and lowest paid starters, or on the the depth of it's TAM-eligible[^1] roster?
+
+[^1]: TAM (Targeted Allocation Money) Players: The MLS "middle class," consisting of high-level starters earning above the Maximum Salary Budget Charge ($803,125) but below the Designated Player threshold. These players' budget hits are "bought down" using league-allocated funds. See the official documentation [here](https://www.mlssoccer.com/news/major-league-soccer-unveils-club-roster-profiles-following-2026-roster-compliance#:~:text=A%20TAM%20Player%20is%20a,are%20static%20as%20of%20Feb.).
+
+### Model specification
+
+#### Baseline Model
+
+$$
+xGD_{it} = \beta_0 + \beta_1 Gini_{it} + \varepsilon_{it}
+$$
+
+#### Dispersion Model
+
+$$xGD_{it} = \beta_0 + \beta_1 \text{Gini}_{it} + \beta_2 \text{MidClassDepth}_{it} + \beta_3 \log(\text{TotalSalary}_{it}) + \varepsilon_{it}$$
+
+Evaluates the importance of TAM players, controlling for total team spending.
+
+#### Multi Season Roster Model
+
+$$xGD_{it} = \beta_1 \text{Gini}_{it} + \beta_2 \text{MidClassDepth}_{it} + \alpha_i + \gamma_t + \varepsilon_{it}$$
+
+Within a specific team over several years, does performance improve when that specific team moves toward a more balanced roster?
+
+### Assumptions
+
+	•	Linearity
+	•	No Multicollinearity
+	•	Independence
+
+
+### Why this model is appropriate
+
+Due to the MLS salary cap, every dollar spent 
+on a "Star" is a dollar that could've been used somewhere else on the roster. The previous analysis 
+evaluates spending efficiency, this model tests the roster structure. By using the Gini 
+coefficient and TAM-depth, we can determine if success comes from a roster that is top-heavy (high inequality) or from a deep roster (high middle-class density).
+
+
+### Model evaluation plan
+
+	•	Adjusted $R^2$: To measure how much additional variance in xGD is explained 
+	by roster distribution compared to a baseline model.
+	•	Akaike Information Criterion (AIC): To determine if adding "Middle Class" 
+	complexity improves model fit without over-fitting.
+	•	Coefficient Analysis: Evaluating the significance of $\beta_1$ (Gini) to 
+	identify whether inequality is correlated with performance.
+
+
+### Uncertainty plan
+
+	•	95% confidence intervals: To verify that the effects of Gini and TAM-depth are
+	statistically distinguishable from zero.
+	•	Clustered Standard Errors: Grouped by team_id to account for correlation in
+	performance across multiple seasons.
+	•	Sensitivity Analysis: Testing the model with and without extreme salary outliers. 
+	
+
+## Individual Analysis 3 (Brendan Flynn)
+
+#### Question
+
+Does the allocation of salary across positions affect team performance? In particular, do teams that spend a larger share of payroll on attacking players, midfielders, defenders, or goalkeepers perform differently on average?
+  
+#### Model Specification
+
+While total payroll measures the overall financial resources a team invests into their roster, teams vary drastically in what positions they invest more heavily into. Some teams may prioritize investing heavily into forwards who are generally most responsible for increasing the expected goals of a team but also garner a higher salary. Other teams may prioritize a more balanced spending strategy, spreading spending out across positions. 
+  
+#### Baseline Model
+
+$$
+xGD_{it} =
+\beta_0 +
+\beta_1 FShare_{it} +
+\beta_2 MShare_{it} +
+\beta_3 DShare_{it} +
+\beta_4 \log(Payroll_{it}) +
+\gamma_t +
+\varepsilon_{it}
+$$
+
+#### Attacking Spend Interaction Model
+$$
+\begin{equation}
+xGD_{it} = \beta_0 + \beta_1 \, AttackShare_{it} + \beta_2 \, \log(Payroll_{it}) + \beta_3 \left( AttackShare_{it} \times \log(Payroll_{it}) \right) + \gamma_t + \epsilon_{it}
+\end{equation}
+$$
+
+#### Assumptions
+- Linearity
+- Independence
+- No Multicollinearity
+- Homoskedasticity
+
+#### Why this model is appropriate
+
+This regression framework directly addresses the central research question by estimating the marginal effect of reallocating payroll across positions. By including total payroll in the model, we separate the overall level of spending and the distribution of spending across positions. Season fixed effects further control for league-wide changes such as rule changes, league expansion, or shifts in playing style over time. Evaluates whether teams that allocate a larger share of payroll to forwards, midfielders, or defenders perform differently on average, while controlling for season-level effects.
+
+#### Model Evaluation Plan
+
+Model performance will be evaluated using several metrics:
+
+- Coefficient significance tests to determine whether positional spending shares are associated with team performance
+- R-squared and adjusted R-squared to evaluate the proportion of variation in expected goal differential explained by the model
+- Residual diagnostics to check for violations of model assumptions
+
+#### Uncertainty Plan
+
+- standard errors and confidence intervals for regression coefficients
+- hypothesis testing using t-statistics and p-values
+- sensitivity checks with alternative specification
+
+### Clustering Approach
+
+#### Model Specification
+
+In addition to the regression model, a clustering approach is used to identify common payroll allocation strategies among MLS teams. Each team-season observation is represented by four features: Forward salary share, Midfielder salary share, Defender salary share, and Goalkeeper salary share. A k-means clustering algorithm groups teams into clusters based on these salary allocation profiles. The algorithm minimizes within-cluster variation in payroll allocation patterns.
+
+#### Assumptions
+
+- Teams with similar salary allocation profiles represent similar roster construction strategies.
+- Euclidean distance between salary shares appropriately captures similarity between teams.
+- The selected number of clusters adequately represents the underlying strategies present in the data.
+
+#### Why this model is appropriate
+While regression analysis estimates marginal effects of salary allocation, clustering identifies distinct team-building strategies present in the league. This approach allows us to examine whether teams that emphasize different positional spending strategies exhibit different performance outcomes.
+
+#### Model Evaluation Plan
+
+Cluster quality will be evaluated using:
+- cluster sizes and stability
+- visual inspection of cluster centers
+- comparison of average team performance across clusters
+
+#### Uncertainty Plan
+
+Uncertainty in the clustering results will be addressed by:
+
+testing alternative numbers of clusters
+examining the robustness of cluster centers
+comparing performance differences across clusters
+
+
+# Results
+
+## Individual Analysis 1 Results (Dom)
+
+The results below focus on the player-level GAM and the final multilevel model. The GAM is used to construct predicted player value, while the multilevel model is used for the main team-level inference.
+
+```{r, echo = FALSE}
+
+# -------------------------
+# GAM tables
+# -------------------------
+
+gam_param_tbl <- broom::tidy(fit_player_gam, parametric = TRUE)
+
+#knitr::kable(
+# gam_param_tbl,
+#  digits = 3,
+#  caption = "Player-Level GAM: Parametric Terms"
+#)
+
+gam_smooth_tbl <- broom::tidy(fit_player_gam, parametric = FALSE)
+
+#knitr::kable(
+#  gam_smooth_tbl,
+#  digits = 3,
+#  caption = "Player-Level GAM: Smooth Terms"
+#)
+
+
+# -------------------------
+# Extended multilevel model (fixed effects)
+# -------------------------
+
+ml_fixed_tbl <- broom.mixed::tidy(
+  team_efficiency_model_ml_ext2,
+  effects = "fixed",
+  conf.int = TRUE
+) |>
+  select(term, estimate, std.error, p.value, conf.low, conf.high) |>
+  mutate(
+    term = recode(
+      term,
+      `(Intercept)` = "Intercept",
+      pred_val_s = "Predicted roster value",
+      salary_s = "Total salary",
+      age_s = "Average age",
+      top3_share = "Top 3 salary share",
+      u22_proxy_count = "U22 proxy count",
+      share_F = "Forward salary share",
+      share_M = "Midfield salary share"
+    ),
+    across(where(is.numeric), ~round(.x, 3))
+  )
+
+knitr::kable(
+  ml_fixed_tbl,
+  digits = 3,
+  caption = "Final Multilevel Model: Fixed Effects"
+)
+
+
+# -------------------------
+# Extended multilevel model (random effects)
+# -------------------------
+
+ran_pars_tbl <- broom.mixed::tidy(
+  team_efficiency_model_ml_ext2,
+  effects = "ran_pars",
+  conf.int = TRUE
+) |>
+  mutate(
+    across(where(is.numeric), ~round(.x, 3))
+  )
+
+#knitr::kable(
+#  ran_pars_tbl,
+#  digits = 3,
+#  caption = "Extended Multilevel Model: Random Effects"
+#)
+```
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 6}
+old_par <- par(no.readonly = TRUE)
+
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1), oma = c(0, 0, 2, 0))
+
+plot(
+  fit_player_gam,
+  select = 1,
+  shade = TRUE,
+  shade.col = "gray85",
+  seWithMean = TRUE,
+  scheme = 1,
+  xlab = "Log Base Salary",
+  ylab = "Partial Effect on GAAR",
+  main = "Overall Salary Smooth"
+)
+
+plot(
+  fit_player_gam,
+  select = 2,
+  shade = TRUE,
+  shade.col = "gray85",
+  seWithMean = TRUE,
+  scheme = 1,
+  xlab = "Log Base Salary",
+  ylab = "Partial Effect on GAAR",
+  main = "Salary Smooth: Defender"
+)
+
+plot(
+  fit_player_gam,
+  select = 3,
+  shade = TRUE,
+  shade.col = "gray85",
+  seWithMean = TRUE,
+  scheme = 1,
+  xlab = "Log Base Salary",
+  ylab = "Partial Effect on GAAR",
+  main = "Salary Smooth: Forward"
+)
+
+plot(
+  fit_player_gam,
+  select = 4,
+  shade = TRUE,
+  shade.col = "gray85",
+  seWithMean = TRUE,
+  scheme = 1,
+  xlab = "Log Base Salary",
+  ylab = "Partial Effect on GAAR",
+  main = "Salary Smooth: Midfielder"
+)
+
+mtext(
+  "Player-Level GAM Partial Effects",
+  outer = TRUE,
+  cex = 1.2,
+  font = 2
+)
+
+par(old_par)
+```
+
+#### Player Level GAM
+
+The player-level GAM shows that salary is related to goals added above replacement, but the relationship is not the same across positions. The overall salary smooth is positive, meaning that higher-paid players generally have higher predicted value. The position-specific smooths show how this overall salary effect is adjusted for defenders, forwards, and midfielders.
+
+For defenders and midfielders, the position-specific smooths decline as salary increases, suggesting that the salary-value relationship is weaker for those positions than the overall trend. For forwards, the partial effect decreases until roughly a log base salary of 14, or about $1.2 million, before increasing slightly at higher salaries. This suggests that salary is useful as a signal of player value, but the return to spending depends on positional context.
+
+These results support using predicted player value rather than raw salary in the team-level model. Payroll alone does not tell us whether a team is actually getting production from its spending, so the GAM helps translate player salaries into estimated on-field value before aggregating to the team-season level.
+
+#### Multilevel Team Model
+
+The final multilevel model suggests that predicted roster value is the clearest predictor of team performance. Holding the other roster features constant, predicted roster value has a strong positive association with goal differential ($\beta = 6.52$, $p < 0.001$, 95% CI: 4.59 to 8.45). Total salary is negative conditional on predicted value ($\beta = -6.01$, $p < 0.001$, 95% CI: -8.29 to -3.72), but this should not be interpreted as evidence that spending directly hurts teams. Because predicted value is partly derived from salary through the player-level GAM, these two coefficients are best interpreted jointly: teams perform better when their spending translates into player production, while high spending without corresponding predicted value is not enough.
+
+Other roster-construction variables show weaker evidence. Top 3 salary share has a positive point estimate, but its confidence interval includes zero (95% CI: -0.44 to 27.93), so the result is suggestive rather than conclusive. Average age is negative but also uncertain, while U22 proxy count, forward salary share, and midfield salary share do not show clear independent effects after accounting for predicted roster value, total salary, and team-level differences.
+
+The random team intercepts are also important because they allow teams to have baseline differences not captured by the observed roster variables, such as front-office quality, coaching, tactical fit, or market structure. Thus, the main takeaway is not simply that certain salary variables matter, but that efficient roster construction matters after accounting for persistent team heterogeneity.
+
+This connects back to the player-level GAM: the GAM shows that salary is related to player value, but not in a simple one-to-one way. The multilevel model then shows that teams with more predicted value from their rosters tend to perform better, while raw payroll alone is not sufficient.
+
+### Model Comparison
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+# Assumes your dataframe is team_season with columns:
+# xgd, pred_roster_value, log_salary, avg_age, top3_share, 
+# u22_count, fwd_share, mid_share, team, season
+
+loo_results <- vector("numeric", nrow(team_efficiency_model_data_ext))
+
+for (i in seq_len(nrow(team_efficiency_model_data_ext))) {
+  
+  train <- team_efficiency_model_data_ext[-i, ]
+  test  <- team_efficiency_model_data_ext[i, ]
+  
+  fit <- lmer(
+    xgd ~ pred_val_s + salary_s + age_s + top3_share + u22_proxy_count +
+      share_F + share_M + (1 | team_id),
+    data = train
+  )
+  
+  # Use fixed effects only for held-out prediction
+  # (team random effect may not exist for unseen teams)
+  pred <- predict(fit, newdata = test, allow.new.levels = TRUE)
+  loo_results[i] <- test$xgd - pred
+}
+
+loo_rmse <- sqrt(mean(loo_results^2))
+loo_mae  <- mean(abs(loo_results))
+
+
+model_eval_tbl <- tibble::tibble(
+  Model = c(
+    "Payroll-only benchmark",
+    "Fixed-effect team model",
+    "Final multilevel model (in-sample)",
+    "Final multilevel model (LOOCV)"
+  ),
+  RMSE = c(
+    sqrt(mean(residuals(panel_team_model)^2, na.rm = TRUE)),
+    sqrt(mean(residuals(team_efficiency_model)^2, na.rm = TRUE)),
+    sqrt(mean(residuals(team_efficiency_model_ml_ext2)^2, na.rm = TRUE)),
+    round(loo_rmse, 2)
+  ),
+  MAE = c(
+    mean(abs(residuals(panel_team_model)), na.rm = TRUE),
+    mean(abs(residuals(team_efficiency_model)), na.rm = TRUE),
+    mean(abs(residuals(team_efficiency_model_ml_ext2)), na.rm = TRUE),
+    round(loo_mae, 2)
+  )
+)
+
+knitr::kable(
+  model_eval_tbl,
+  digits = 2,
+  caption = "Model Comparison"
+)
+```
+
+In-sample error decreases across the three models, with the final multilevel model achieving the lowest RMSE and MAE. LOO-CV estimates for the final model (RMSE = 10.12, MAE = 8.01) are modestly higher than in-sample, which is expected given the small sample (about 29 team-seasons). The limited gap between in-sample and LOO-CV suggests the model is not badly overfit, though out-of-sample performance would need to be validated on additional seasons before drawing strong predictive conclusions.
+
+### Answer to Research Question
+
+The results suggest that team performance in MLS is related to payroll, but not simply because spending more automatically produces better teams. At the team level, performance is explained more by predicted player value than by raw salary. Conditional on value, higher salary is associated with worse outcomes, suggesting that inefficient spending hurts roster construction.
+
+Salary concentration may help, but this result is less certain than the player value and salary findings. The GAM also suggests that salary does not translate into value in the same way across positions, which supports using predicted player value rather than raw payroll as the main roster-quality measure. However, the final multilevel model does not show clear independent effects for positional salary shares, so the main conclusion is about efficiency rather than simply shifting spending toward a specific position.
+
+Additionally, there is weak evidence that younger teams are associated with better performances. Along with that, there is weak evidence that a higher top 3 salary share (top-heavy spending) is associated with better performances as well.
+
+Overall, efficient roster construction appears to matter more than total spending alone.
+
+## Individual Analysis 2 Results (Nick)
+
+
+## Individual Analysis 3: Positional Spending (Flynn)
+
+#### Positional Spending Regression Results
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(modelsummary)
+
+modelsummary(
+  list("Positional Spending Model" = model2),
+  coef_map = c(
+    "MShare" = "Midfielder Share",
+    "DShare" = "Defender Share",
+    "GKShare" = "Goalkeeper Share",
+    "log_payroll" = "Log Payroll"
+  ),
+  gof_map = c("nobs", "r.squared", "adj.r.squared"),
+  statistic = "std.error",
+  stars = c("*" = .1, "**" = .05, "***" = .01),
+  notes = "Standard errors in parentheses. Season fixed effects included but omitted from table."
+)
+```
+Looking at the baseline regression model we find that the regression results provide no evidence that the allocation of salary across positions is associated with team performance. The total payroll (log payroll) is also not statistically significant, suggesting that higher spending alone does not guarantee improved performance once positional allocation is accounted for. The model explains very little variation in team performance (R² = 0.028), further indicating that these variables are not strong predictors of success.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(modelsummary)
+
+modelsummary(
+  list("Interaction Model" = model5),
+  coef_map = c(
+    "attack_share" = "Attack Salary Share",
+    "log_payroll" = "Log Payroll",
+    "attack_share:log_payroll" = "Attack Share × Log Payroll"
+  ),
+  gof_map = c("nobs", "r.squared", "adj.r.squared"),
+  statistic = "std.error",
+  stars = c("*" = .1, "**" = .05, "***" = .01),
+  notes = "Standard errors in parentheses. Season fixed effects included but omitted from table."
+)
+```
+
+The interaction model reveals both the main effects of attack share (p < 0.01) and log payroll (p < 0.01) are positive and statistically significant, suggesting that higher spending on attacking players and larger overall payrolls are associated with improved performance. The interaction term between attack share and log payroll is negative and statistically significant (p < 0.01) indicating that the positive effect of allocating salary to attacking players diminishes as total payroll increases. Despite these statistically significant relationships, the model still explains only a modest portion of the variation in performance (R² ≈ 0.053), indicating that other unobserved factors remain important determinants of team success.
+
+#### Positional Spending Cluster Results
+```{r, include = FALSE, eval=FALSE}
+cluster_centers <- as.data.frame(clusters$centers)
+cluster_centers$cluster <- factor(1:nrow(cluster_centers))
+
+cluster_centers_long <- cluster_centers %>%
+  pivot_longer(-cluster, names_to = "Position", values_to = "Share")
+
+ggplot(cluster_centers_long, aes(Position, Share, group = cluster, color = cluster)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  labs(
+    title = "Roster Construction Strategies in MLS",
+    x = "Position",
+    y = "Average Salary Share",
+    color = "Cluster"
+  ) +
+  theme_minimal()
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+cluster_centers <- as.data.frame(clusters$centers) |>
+  rownames_to_column("Cluster") |>
+  mutate(
+    across(c(FShare, MShare, DShare, GKShare), ~ round(.x, 3)),
+    Strategy = case_when(
+      Cluster == "1" ~ "Midfield-heavy / balanced defense",
+      Cluster == "2" ~ "Goalkeeper-heavy outlier",
+      Cluster == "3" ~ "Balanced allocation",
+      Cluster == "4" ~ "Attack-heavy"
+    )
+  ) |>
+  select(Cluster, Strategy, FShare, MShare, DShare, GKShare)
+
+kable(
+  cluster_centers,
+  caption = "Cluster Centers: Average Salary Share by Position",
+  col.names = c("Cluster", "Strategy", "Forward Share", "Midfielder Share", 
+                "Defender Share", "Goalkeeper Share"),
+  digits = 3
+) |>
+  kable_styling(full_width = FALSE)
+```
+The clustering results reveal several distinct roster construction strategies based on how teams allocate salary across positions. Cluster 4 represents attack-heavy teams, allocating over 55% of payroll to forwards, while Cluster 1 is midfield-heavy, with the majority of spending concentrated in the midfield. Cluster 3 reflects a balanced allocation strategy, distributing salary relatively evenly across positions.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(knitr)
+library(kableExtra)
+
+cluster_results_clean <- cluster_results |>
+  mutate(
+    avg_xGD = round(avg_xGD, 2),
+    sd_xGD = round(sd_xGD, 2),
+    Strategy = case_when(
+      cluster == 1 ~ "Midfield-heavy",
+      cluster == 3 ~ "Balanced",
+      cluster == 4 ~ "Attack-heavy"
+    )
+  ) |>
+  select(cluster, Strategy, avg_xGD, sd_xGD, teams)
+
+kable(
+  cluster_results_clean,
+  caption = "Average Team Performance by Roster Construction Strategy",
+  col.names = c("Cluster", "Strategy", "Avg. xGD", "SD xGD", "Team-Seasons")
+) |>
+  kable_styling(full_width = FALSE)
+```
+
+The cluster-level performance results show meaningful differences in average team outcomes across roster construction strategies. Cluster 4, which corresponds to attack-heavy teams, has the highest average expected goal differential (avg_xGD ≈ 1.79). Cluster 1, representing midfield-heavy teams, shows modestly positive performance (avg_xGD ≈ 0.36) and Cluster 3, which reflects a more balanced allocation strategy, has a negative average xGD (≈ -0.92), indicating comparatively weaker performance outcomes. Despite these differences in average performance, the relatively large standard deviations within each cluster (≈ 11.3–11.7) suggest substantial variation in outcomes across teams within the same strategy. This indicates that while roster construction strategy may be associated with performance, it is not the sole determinant of team success.
+
+# Discussion
+
+## Conclusion
+
+This project looked at how MLS teams build rosters under salary and roster constraints, focusing on total spending, salary concentration, positional allocation, roster depth, and age. Overall, the results suggest that team performance is not explained by one roster-building strategy alone. Instead, successful teams seem to benefit from combining high-impact spending at the top of the roster with enough productive depth across the rest of the team.
+
+Across our models, there was at least some evidence that top-heavy spending is associated with better performance. This does not mean that teams should only spend on a few stars, but it does suggest that having high-end players matters in MLS. Nick’s model adds an important qualification: middle-class depth, measured through TAM-style roster construction, also appears to improve performance. Taken together, this suggests that the best roster strategy may not be purely star-heavy or purely balanced, but a combination of elite contributors and reliable depth.
+
+We also found evidence that where teams spend matters. Dom’s model and Flynn’s positional spending model both suggest that spending more on forwards may be associated with better team success. This makes sense in the context of soccer performance, since attacking players are often the most expensive and can have a large effect on chance creation and finishing. However, this should still be interpreted carefully because positional spending effects were not always estimated with high precision.
+
+Finally, Dom’s and Nick’s models both found some evidence that younger teams are associated with better performance. This could reflect the value of younger, high-energy players, better roster flexibility, or the ability to get strong production from players before they become more expensive. Overall, our findings suggest that successful MLS roster construction depends on balancing star power, attacking investment, younger contributors, and enough middle-class depth to avoid relying only on a few expensive players.
+
+## What We Learned
+
+The main thing we learned is that MLS roster construction is multidimensional. In a salary-cap league, it is not surprising that payroll alone does not explain everything. The more interesting result is that several specific roster-building choices appear to matter.
+
+First, top-end spending seems useful. Teams with more salary concentrated among their highest-paid players often performed better, at least to some degree. Second, this did not come at the expense of depth in Nick’s model, where TAM-style middle-class roster strength was also associated with stronger performance. Third, positional allocation may matter, especially investment in forwards. Fourth, age appears relevant, since both Dom’s and Nick’s results suggest that younger teams tended to perform better.
+
+These findings point toward a more specific interpretation than simply “spend efficiently.” Strong MLS teams may be the ones that use their constrained budgets to build around high-impact players, especially attackers, while still maintaining enough depth and youth to support those players over a full season.
+
+## Limitations
+
+There are several limitations to our analysis. First, some roster-rule variables are proxies rather than official MLS labels. For example, U22 investment, TAM-style depth, and star-player concentration are approximated using available salary, age, and roster data, so they may not perfectly match official MLS roster designations.
+
+Second, salary and performance are hard to separate. Better players usually earn higher salaries, but salary can also reflect reputation, past performance, contract timing, market value, or negotiation power. Because of that, our results should be interpreted as associations, not causal proof that a specific spending strategy directly causes better performance.
+
+Third, some effects are estimated with substantial uncertainty. This is especially true for positional spending and salary concentration. Even when the point estimates suggest a positive relationship, the confidence intervals are sometimes wide, so these findings should be treated as suggestive rather than definitive.
+
+Fourth, Dom’s predicted roster value measure comes from a first-stage player-level GAM. This means the team-level confidence intervals should be interpreted as conditional on that estimated value measure, not as fully accounting for uncertainty from both modeling stages.
+
+Finally, roster construction changes throughout a season. Our team-season data does not fully capture injuries, transfers, player availability, tactical fit, or when specific players actually contributed. This matters because a team’s salary structure at one point in time may not fully represent the roster that drove performance across the season.
+
+## Future Work
+
+Future work could improve this project by using official MLS roster designations for Designated Players, U22 players, TAM players, and other roster mechanisms instead of relying on proxies. This would make the roster construction variables more accurate and would allow for a cleaner test of how specific MLS rules affect team-building strategy.
+
+A larger multi-season dataset would also help test whether these relationships are stable across different years and league environments. This would be especially useful for checking whether top-heavy spending, TAM-style depth, forward spending, and younger rosters consistently relate to better performance.
+
+More detailed information on injuries, transfers, minutes played, and player availability would improve the connection between roster spending and actual performance. It would also help separate salary committed to players from salary that actually contributed on the field.
+
+Another useful extension would be to compare regular-season performance with playoff performance. MLS teams may build rosters differently depending on whether they are trying to maximize full-season consistency or peak performance in knockout games.
+
+## Final Takeaway
+
+Overall, our results suggest that successful MLS roster construction is not just about spending more or spreading money evenly. The stronger pattern is that teams may benefit from investing in high-impact players, especially forwards, while also maintaining younger contributors and a strong middle class of productive players. In a constrained league like MLS, the best roster construction strategy appears to involve balancing star power, depth, age, and positional investment rather than relying on one simple spending formula.
+
+# Appendix
+
+## Section A: Code
+
+```{r, include = FALSE}
+library(tidyverse)
+library(mgcv)
+library(lme4)
+library(lmerTest)
+library(broom)
+library(broom.mixed)
+library(lubridate)
+
+# EDA objects
+mls_salaries_2025 <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/mls_salaries_2025.rds"))
+)
+
+team_model_data <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/team_model_data.rds"))
+)
+
+position_salary <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/position_salary.rds"))
+)
+
+# Model objects
+mls_salaries_2025 <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/mls_salaries_2025.rds"))
+)
+
+team_model_data <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/team_model_data.rds"))
+)
+
+position_salary <- readRDS(
+  gzcon(url("https://raw.githubusercontent.com/domihw05/FinalProject_SportsAnalyticsCourse/main/Data/position_salary.rds"))
+)
+
+# Optional final datasets if needed for extra plots
+panel_team_data <- readRDS("Models/panel_team_data.rds")
+player_season <- readRDS("Models/player_season.rds")
+team_efficiency_model_data <- readRDS("Models/team_efficiency_model_data.rds")
+team_efficiency_model_ml_ext2 <- readRDS("Models/team_efficiency_model_ml_ext2.rds")
+panel_team_model <- readRDS("Models/panel_team_model.rds")
+team_efficiency_model <- readRDS("Models/team_efficiency_model.rds")
+fit_player_gam <- readRDS("Models/fit_player_gam.rds")
+team_efficiency_model_data_ext <- readRDS("Data/team_efficiency_model_data_ext.rds")
+```
+
+```{r, include = FALSE}
+library(itscalledsoccer)
+library(tidyverse)
+library(mgcv)
+library(lme4)
+library(lmerTest)
+library(lubridate)
+library(broom)
+library(broom.mixed)
+
+asa_client <- AmericanSoccerAnalysis$new()
+
+players <- asa_client$get_players(leagues = "mls")
+teams   <- asa_client$get_teams(leagues = "mls")
+
+seasons <- 2013:2025
+
+### Build multi-season team panel
+
+```
+
+
+```{r, echo = FALSE}
+# Team performance by season
+asa_team_xgoals_panel <- asa_client$get_team_xgoals(
+  leagues = "mls",
+  season_name = seasons,
+  split_by_seasons = TRUE
+) |>
+  left_join(teams, by = "team_id")
+
+team_performance_panel <- asa_team_xgoals_panel |>
+  mutate(season_name = as.integer(season_name)) |>
+  group_by(team_id, team_name, season_name) |>
+  summarize(
+    xg_for = sum(xgoals_for, na.rm = TRUE),
+    xg_against = sum(xgoals_against, na.rm = TRUE),
+    xgd = xg_for - xg_against,
+    .groups = "drop"
+  )
+
+# Multi-season salary data
+mls_salaries_panel <- asa_client$get_player_salaries(
+  leagues = "mls",
+  season_name = seasons
+) |>
+  left_join(players, by = "player_id") |>
+  mutate(
+    season_name = as.integer(season_name),
+    team_id = as.character(team_id)
+  )
+
+team_salary_panel <- mls_salaries_panel |>
+  group_by(team_id, season_name) |>
+  summarize(
+    total_salary = sum(base_salary, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+panel_team_data <- team_performance_panel |>
+  mutate(team_id = as.character(team_id)) |>
+  left_join(team_salary_panel, by = c("team_id", "season_name")) |>
+  mutate(
+    log_salary = log(total_salary),
+    season_name = factor(season_name)
+  )
+```
+
+
+```{r, echo = FALSE}
+### Baseline team model
+
+
+panel_team_model <- lm(
+  xgd ~ log_salary + season_name,
+  data = panel_team_data
+)
+
+broom::tidy(panel_team_model, conf.int = TRUE)
+```
+
+
+```{r, echo = FALSE}
+### Build player-season dataset
+
+asa_player_gplus <- asa_client$get_player_goals_added(
+  leagues = "mls",
+  season_name = seasons,
+  split_by_seasons = TRUE,
+  split_by_teams = TRUE,
+  above_replacement = TRUE
+) |>
+  mutate(
+    season_name = as.integer(season_name),
+    team_id = as.character(team_id)
+  )
+
+player_salaries_panel <- asa_client$get_player_salaries(
+  leagues = "mls",
+  season_name = seasons
+) |>
+  left_join(players, by = "player_id") |>
+  mutate(
+    season_name = as.integer(season_name),
+    team_id = as.character(team_id)
+  ) |>
+  group_by(player_id, team_id, season_name) |>
+  summarize(
+    base_salary = mean(base_salary, na.rm = TRUE),
+    position = first(position),
+    .groups = "drop"
+  )
+
+player_season <- asa_player_gplus |>
+  left_join(
+    player_salaries_panel,
+    by = c("player_id", "team_id", "season_name")
+  ) |>
+  left_join(players |> select(player_id, birth_date), by = "player_id") |>
+  mutate(
+    log_salary = log(base_salary + 1),
+    position = factor(position),
+    age = season_name - year(birth_date)
+  ) |>
+  filter(
+    !is.na(goals_added_above_replacement),
+    !is.na(log_salary),
+    !is.na(position),
+    position %in% c("D", "M", "F")
+  ) |>
+  mutate(
+    position = droplevels(factor(position))
+  )
+```
+
+```{r, echo = FALSE}
+### Player-level GAM
+
+fit_player_gam <- gam(
+  goals_added_above_replacement ~
+    s(log_salary, k = 5) +
+    position +
+    s(log_salary, by = position, k = 4),
+  data = player_season,
+  method = "REML"
+)
+
+broom::tidy(fit_player_gam, conf.int = TRUE)
+```
+
+```{r, echo = FALSE}
+### Aggregate predicted player value to team-season
+
+player_season_model <- player_season |>
+  filter(position %in% c("D", "M", "F")) |>
+  mutate(
+    position = droplevels(factor(position))
+  )
+
+player_season_model <- player_season_model |>
+  mutate(
+    predicted_value = predict(fit_player_gam, newdata = player_season_model)
+  )
+
+team_efficiency <- player_season_model |>
+  group_by(team_id, season_name) |>
+  summarize(
+    predicted_team_value = sum(predicted_value * minutes_played / 90, na.rm = TRUE),
+    player_total_salary = sum(base_salary, na.rm = TRUE),
+    avg_age = mean(age, na.rm = TRUE),
+    pct_att = mean(position == "F"),
+    pct_midfielders = mean(position == "M"),
+    .groups = "drop"
+  )
+```
+
+```{r, echo = FALSE}
+### Main team model
+
+team_efficiency_model_data <- panel_team_data |>
+  mutate(
+    team_id = as.character(team_id),
+    season_name = as.integer(as.character(season_name))
+  ) |>
+  left_join(team_efficiency, by = c("team_id", "season_name")) |>
+  filter(!is.na(xgd), !is.na(predicted_team_value), !is.na(player_total_salary))
+
+team_efficiency_model <- lm(
+  xgd ~ predicted_team_value + player_total_salary +
+    factor(season_name) + avg_age + pct_att + pct_midfielders,
+  data = team_efficiency_model_data
+)
+
+broom::tidy(team_efficiency_model, conf.int = TRUE)
+```
+
+```{r, echo = FALSE}
+
+### Multilevel robustness model
+
+team_efficiency_model_data <- team_efficiency_model_data |>
+  mutate(
+    pred_val_s = as.numeric(scale(predicted_team_value)),
+    salary_s   = as.numeric(scale(player_total_salary)),
+    age_s      = as.numeric(scale(avg_age)),
+    pct_att_s  = as.numeric(scale(pct_att)),
+    pct_mid_s  = as.numeric(scale(pct_midfielders))
+  )
+
+team_efficiency_model_ml <- lmer(
+  xgd ~ pred_val_s + salary_s + age_s + pct_att_s + pct_mid_s +
+    (1 | team_id) + (1 | season_name),
+  data = team_efficiency_model_data
+)
+
+library(broom.mixed)
+
+broom.mixed::tidy(team_efficiency_model_ml, effects = "fixed", conf.int = TRUE)
+broom.mixed::tidy(team_efficiency_model_ml, effects = "ran_pars", conf.int = TRUE)
+broom.mixed::tidy(team_efficiency_model_ml, effects = "ran_vals", conf.int = TRUE)
+```
+
+```{r, include = FALSE}
+top3_tbl <- player_season |>
+  group_by(team_id, season_name) |>
+  arrange(desc(base_salary), .by_group = TRUE) |>
+  mutate(rank = row_number()) |>
+  summarize(
+    top3_salary = sum(base_salary[rank <= 3], na.rm = TRUE),
+    total_salary = sum(base_salary, na.rm = TRUE),
+    top3_share = top3_salary / total_salary,
+    .groups = "drop"
+  )
+
+u22_tbl <- player_season |>
+  mutate(u22_proxy_conservative = age <= 22 & base_salary >= 200000 & base_salary <= 750000) |>
+  group_by(team_id, season_name) |>
+  summarize(
+    u22_proxy_count = sum(u22_proxy_conservative, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+pos_tbl <- player_season |>
+  group_by(team_id, season_name, position) |>
+  summarize(
+    pos_salary = sum(base_salary, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  group_by(team_id, season_name) |>
+  mutate(
+    total_salary = sum(pos_salary),
+    pos_share = pos_salary / total_salary
+  ) |>
+  select(-pos_salary, -total_salary) |>
+  filter(!is.na(position)) |>
+  tidyr::pivot_wider(
+    names_from = position,
+    values_from = pos_share,
+    values_fill = 0
+  ) |>
+  rename(
+    share_D = D,
+    share_M = M,
+    share_F = F
+  )
+
+team_efficiency_model_data_ext <- team_efficiency_model_data |>
+  left_join(top3_tbl, by = c("team_id", "season_name")) |>
+  left_join(u22_tbl, by = c("team_id", "season_name")) |>
+  left_join(pos_tbl, by = c("team_id", "season_name"))
+
+team_efficiency_model_ml_ext <- lmer(
+  xgd ~ pred_val_s + salary_s + age_s +
+    top3_share + u22_proxy_count + share_F + share_M +
+    (1 | team_id) + (1 | season_name),
+  data = team_efficiency_model_data_ext
+)
+
+summary(team_efficiency_model_ml_ext)
+
+team_efficiency_model_ml_ext2 <- lmer(
+  xgd ~ pred_val_s + salary_s + age_s + top3_share + u22_proxy_count +
+    share_F + share_M + (1 | team_id),
+  data = team_efficiency_model_data_ext
+)
+
+summary(team_efficiency_model_ml_ext2)
+```
+
+```{r, include = FALSE}
+
+# Summarize payroll by team, season, and position
+pos_salary <- mls_salaries_panel %>%
+  group_by(team_id, season_name, position) %>%
+  summarise(
+    pos_salary = sum(guaranteed_compensation, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+team_payroll <- mls_salaries_panel %>%
+  group_by(team_id, season_name) %>%
+  summarise(
+    payroll = sum(guaranteed_compensation, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(season_name = as.character(season_name))
+
+# Compute total payroll and salary shares
+pos_share <- pos_salary %>%
+  group_by(team_id, season_name) %>%
+  mutate(
+    total_salary = sum(pos_salary),
+    share = pos_salary / total_salary
+  ) %>%
+  ungroup() %>%
+  select(team_id, season_name, position, share)
+
+
+# Reshape to wide format
+pos_share_wide <- pos_share %>%
+  pivot_wider(
+    names_from = position,
+    values_from = share,
+    names_prefix = "",
+    values_fill = 0
+  ) %>%
+  rename(
+    FShare = F,
+    MShare = M,
+    DShare = D,
+    GKShare = GK
+  )
+
+```
+
+```{r, include = FALSE}
+pos_share_wide2 <- pos_share_wide %>%
+  mutate(season_name = as.character(season_name))
+
+regression_data <- asa_team_xgoals_panel %>%
+  select(team_id, season_name, xgoal_difference) %>%
+  left_join(pos_share_wide2, by = c("team_id", "season_name"))
+
+regression_data <- regression_data %>%
+  left_join(team_payroll, by = c("team_id", "season_name"))
+regression_data <- regression_data %>%
+  mutate(log_payroll = log(payroll))
+
+model2 <- lm(
+  xgoal_difference ~ MShare + DShare + GKShare + log_payroll + factor(season_name),
+  data = regression_data
+)
+
+summary(model2)
+```
+
+```{r, include = FALSE}
+model5 <- lm(
+  xgoal_difference ~ attack_share * log_payroll +
+    factor(season_name),
+  data = regression_data
+)
+
+summary(model5)
+```
+
+```{r, include = FALSE}
+#Clustered Data
+cluster_data <- pos_share_wide %>%
+  select(team_id, season_name, FShare, MShare, DShare, GKShare)
+
+set.seed(2026)
+
+clusters <- kmeans(
+  cluster_data %>% select(FShare, MShare, DShare, GKShare),
+  centers = 4,
+  nstart = 25
+)
+
+cluster_data$cluster <- clusters$cluster
+
+cluster_data <- cluster_data %>%
+  mutate(season_name = as.character(season_name))
+
+cluster_data <- cluster_data %>%
+  left_join(
+    asa_team_xgoals_panel %>%
+      select(team_id, season_name, xgoal_difference),
+    by = c("team_id", "season_name")
+  )
+```
+
+```{r, include = FALSE}
+cluster_results <- cluster_data %>%
+  filter(!is.na(xgoal_difference)) %>%
+  group_by(cluster) %>%
+  summarise(
+    avg_xGD = mean(xgoal_difference),
+    sd_xGD = sd(xgoal_difference),
+    teams = n()
+  )
+
+cluster_results
+```
+
+```{r, include = FALSE}
+#Visualize the clusters
+clusters$centers
+```
+
+
+```{r, include = FALSE, eval = false}
+library(ggplot2)
+
+ggplot(cluster_data, aes(x = FShare, y = DShare, color = factor(cluster))) +
+  geom_point(size = 2, alpha = 0.7) +
+  labs(
+    title = "MLS Roster Construction Clusters",
+    subtitle = "Teams grouped by payroll allocation across positions",
+    x = "Forward Salary Share",
+    y = "Defender Salary Share",
+    color = "Cluster"
+  ) +
+  theme_minimal()
+```
+
+
+```{r}
+cluster_centers <- as.data.frame(clusters$centers)
+cluster_centers$cluster <- factor(1:nrow(cluster_centers))
+
+cluster_centers_long <- cluster_centers %>%
+  pivot_longer(-cluster, names_to = "Position", values_to = "Share")
+
+ggplot(cluster_centers_long, aes(Position, Share, group = cluster, color = cluster)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  labs(
+    title = "Roster Construction Strategies in MLS",
+    x = "Position",
+    y = "Average Salary Share",
+    color = "Cluster"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Save Models
+saveRDS(panel_team_model, "Models/panel_team_model.rds")
+saveRDS(fit_player_gam, "Models/fit_player_gam.rds")
+saveRDS(team_efficiency_model, "Models/team_efficiency_model.rds")
+saveRDS(team_efficiency_model_ml, "Models/team_efficiency_model_ml.rds")
+saveRDS(team_efficiency_model_ml_ext2, "Models/team_efficiency_model_ml_ext2.rds")
+
+# also save final data objects if you need plots/tables later
+saveRDS(panel_team_data, "Models/panel_team_data.rds")
+saveRDS(player_season, "Models/player_season.rds")
+saveRDS(team_efficiency_model_data, "Models/team_efficiency_model_data.rds")
+saveRDS(team_efficiency_model_data_ext, "Data/team_efficiency_model_data_ext.rds")
+saveRDS(mls_salaries_2025, "Data/mls_salaries_2025.rds")
+saveRDS(team_model_data, "Data/team_model_data.rds")
+saveRDS(position_salary, "Data/position_salary.rds")
+```
